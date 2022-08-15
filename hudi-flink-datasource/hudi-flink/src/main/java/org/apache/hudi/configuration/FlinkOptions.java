@@ -244,6 +244,12 @@ public class FlinkOptions extends HoodieConfig {
       .withDescription("Enables data-skipping allowing queries to leverage indexes to reduce the search space by"
           + "skipping over files");
 
+  public static final ConfigOption<Boolean> READ_BATCH_INCREMENTAL_CHANGELOG_ENABLED = ConfigOptions
+      .key("read.batch.incremental.changelog.enabled")
+      .booleanType()
+      .defaultValue(false)
+      .withDescription("Enables batch incremental query changLog");
+
   // ------------------------------------------------------------------------
   //  Write Options
   // ------------------------------------------------------------------------

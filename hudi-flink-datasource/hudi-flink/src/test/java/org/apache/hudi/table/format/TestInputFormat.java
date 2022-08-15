@@ -18,6 +18,8 @@
 
 package org.apache.hudi.table.format;
 
+import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.TimestampData;
 import org.apache.hudi.client.HoodieFlinkWriteClient;
 import org.apache.hudi.client.common.HoodieFlinkEngineContext;
 import org.apache.hudi.common.model.EventTimeAvroPayload;
@@ -54,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.hudi.utils.TestData.insertRow;
 import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -472,6 +475,55 @@ public class TestInputFormat {
 
     List<RowData> actual6 = readData(inputFormat6);
     TestData.assertRowDataEquals(actual6, Collections.emptyList());
+  }
+
+  @Test
+  void testReadIncrementallyUsingLogFiles() throws Exception {
+    Map<String, String> options = new HashMap<>();
+    options.put(FlinkOptions.QUERY_TYPE.key(), FlinkOptions.QUERY_TYPE_INCREMENTAL);
+    options.put(FlinkOptions.CHANGELOG_ENABLED.key(), "true");
+    beforeEach(HoodieTableType.MERGE_ON_READ, options);
+
+    // write base file first with compaction.
+    conf.setBoolean(FlinkOptions.COMPACTION_ASYNC_ENABLED, true);
+    conf.setInteger(FlinkOptions.COMPACTION_DELTA_COMMITS, 1);
+    conf.setBoolean(FlinkOptions.READ_BATCH_INCREMENTAL_CHANGELOG_ENABLED, true);
+    TestData.writeData(TestData.DATA_SET_INSERT_UPDATE_DELETE, conf);
+    HoodieTableMetaClient metaClient = StreamerUtil.createMetaClient(tempFile.getAbsolutePath(), HadoopConfigurations.getHadoopConf(conf));
+    List<String> commits = metaClient.getCommitsTimeline().filterCompletedInstants().getInstants()
+        .map(HoodieInstant::getTimestamp).collect(Collectors.toList());
+    assertThat(commits.size(), is(2));
+
+    conf.setString(FlinkOptions.READ_START_COMMIT, commits.get(0));
+    this.tableSource = getTableSource(conf);
+    InputFormat<RowData, ?> inputFormat = this.tableSource.getInputFormat();
+    assertThat(inputFormat, instanceOf(MergeOnReadInputFormat.class));
+    ((MergeOnReadInputFormat) inputFormat).isEmitDelete(true);
+    final String baseResult = TestData.rowDataToString(readData(inputFormat));
+    String expected = "[-D[id1, Danny, 22, 1970-01-01T00:00:00.005, par1]]";
+    assertThat(baseResult, is(expected));
+
+    // write another commit using logs and read again.
+    conf.setBoolean(FlinkOptions.COMPACTION_ASYNC_ENABLED, false);
+    TestData.writeData(Collections.singletonList(
+        insertRow(StringData.fromString("id2"), StringData.fromString("Danny"), 24,
+                  TimestampData.fromEpochMillis(3), StringData.fromString("par1"))), conf);
+    TestData.writeData(Collections.singletonList(
+        insertRow(StringData.fromString("id3"), StringData.fromString("Danny"), 24,
+                  TimestampData.fromEpochMillis(4), StringData.fromString("par1"))), conf);
+    this.tableSource.reset();
+    commits = tableSource.getMetaClient().getCommitsTimeline().filterCompletedInstants().getInstants()
+        .map(HoodieInstant::getTimestamp).collect(Collectors.toList());
+    assertThat(commits.size(), is(4));
+
+    conf.setString(FlinkOptions.READ_START_COMMIT, commits.get(0));
+    conf.setString(FlinkOptions.READ_END_COMMIT, commits.get(2));
+    inputFormat = this.tableSource.getInputFormat();
+    assertThat(inputFormat, instanceOf(MergeOnReadInputFormat.class));
+    ((MergeOnReadInputFormat) inputFormat).isEmitDelete(true);
+    final String baseMergeLogFileResult = TestData.rowDataToString(readData(inputFormat));
+    expected = "[-D[id1, Danny, 22, 1970-01-01T00:00:00.005, par1], +I[id2, Danny, 24, 1970-01-01T00:00:00.003, par1]]";
+    assertThat(baseMergeLogFileResult, is(expected));
   }
 
   @Test
