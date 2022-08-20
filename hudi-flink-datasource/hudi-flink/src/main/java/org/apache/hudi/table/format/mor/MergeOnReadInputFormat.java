@@ -332,11 +332,6 @@ public class MergeOnReadInputFormat
     final boolean pkSemanticLost = Arrays.stream(pkOffset).anyMatch(offset -> offset == -1);
     final LogicalType[] pkTypes = pkSemanticLost ? null : tableState.getColumnTypes(pkOffset);
     final StringToRowDataConverter converter = pkSemanticLost ? null : new StringToRowDataConverter(pkTypes);
-    final int[] partitionOffset = tableState.getColumnsOffsetsInRequired(conf.getString(FlinkOptions.PARTITION_PATH_FIELD).split(","));
-    final boolean partitionSemanticLost = Arrays.stream(pkOffset).anyMatch(offset -> offset == -1);
-    final LogicalType[] partitionTypes = partitionSemanticLost ? null : tableState.getColumnTypes(partitionOffset);
-    final StringToRowDataConverter partitionConverter = partitionSemanticLost ? null : new StringToRowDataConverter(partitionTypes);
-    final int preCombineOffset = tableState.getRequiredPosition(conf.getString(FlinkOptions.PRECOMBINE_FIELD));
 
     return new ClosableIterator<RowData>() {
       private RowData currentRecord;
@@ -365,11 +360,16 @@ public class MergeOnReadInputFormat
               for (int i = 0; i < pkOffset.length; i++) {
                 delete.setField(pkOffset[i], converted[i]);
               }
+              final int preCombineOffset = tableState.getRequiredPosition(conf.getString(FlinkOptions.PRECOMBINE_FIELD));
               if (preCombineOffset != -1) {
                 final AvroToRowDataConverters.AvroToRowDataConverter preCombineConverter =
                     AvroToRowDataConverters.createConverter(tableState.getRequiredRowType().getTypeAt(preCombineOffset));
                 delete.setField(preCombineOffset, preCombineConverter.convert(preCombineValue));
               }
+              final int[] partitionOffset = tableState.getColumnsOffsetsInRequired(conf.getString(FlinkOptions.PARTITION_PATH_FIELD).split(","));
+              final boolean partitionSemanticLost = Arrays.stream(partitionOffset).anyMatch(offset -> offset == -1);
+              final LogicalType[] partitionTypes = partitionSemanticLost ? null : tableState.getColumnTypes(partitionOffset);
+              final StringToRowDataConverter partitionConverter = partitionSemanticLost ? null : new StringToRowDataConverter(partitionTypes);
               if (!partitionSemanticLost) {
                 final String partitionPath = hoodieRecord.getPartitionPath();
                 final String[] partitionFields =
