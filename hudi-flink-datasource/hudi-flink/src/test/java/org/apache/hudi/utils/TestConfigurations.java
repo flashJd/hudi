@@ -55,7 +55,20 @@ public class TestConfigurations {
           DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
       .notNull();
 
-  public static final RowType ROW_TYPE = (RowType) ROW_DATA_TYPE.getLogicalType();
+  public static DataType ROW_DATA_TYPE1 = DataTypes.ROW(
+          DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),// record key
+          DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
+          DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
+          DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
+      .notNull();
+
+  public static RowType ROW_TYPE = (RowType) ROW_DATA_TYPE.getLogicalType();
+
+  public static void set_row_type() {
+    ROW_TYPE = (RowType) ROW_DATA_TYPE1.getLogicalType();
+    SERIALIZER = new RowDataSerializer(ROW_TYPE);
+    return;
+  }
 
   public static final ResolvedSchema TABLE_SCHEMA = SchemaBuilder.instance()
       .fields(ROW_TYPE.getFieldNames(), ROW_DATA_TYPE.getChildren())
@@ -209,7 +222,7 @@ public class TestConfigurations {
         + ")";
   }
 
-  public static final RowDataSerializer SERIALIZER = new RowDataSerializer(ROW_TYPE);
+  public static RowDataSerializer SERIALIZER = new RowDataSerializer(ROW_TYPE);
 
   public static Configuration getDefaultConf(String tablePath) {
     Configuration conf = new Configuration();

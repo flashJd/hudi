@@ -22,7 +22,10 @@ import org.apache.commons.io.FileUtils;
 import org.apache.flink.api.common.io.InputFormat;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.io.InputSplit;
+import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.TimestampData;
 import org.apache.hadoop.fs.Path;
 import org.apache.hudi.common.HoodieJsonPayload;
 import org.apache.hudi.common.model.HoodieTableType;
@@ -35,6 +38,7 @@ import org.apache.hudi.table.format.cow.CopyOnWriteInputFormat;
 import org.apache.hudi.table.format.mor.MergeOnReadInputFormat;
 import org.apache.hudi.util.AvroSchemaConverter;
 import org.apache.hudi.util.StreamerUtil;
+import org.apache.hudi.utils.SchemaBuilder;
 import org.apache.hudi.utils.TestConfigurations;
 import org.apache.hudi.utils.TestData;
 import org.junit.jupiter.api.Test;
@@ -49,6 +53,11 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import static org.apache.hudi.common.model.HoodieTableType.COPY_ON_WRITE;
+import static org.apache.hudi.common.model.HoodieTableType.MERGE_ON_READ;
+import static org.apache.hudi.utils.TestConfigurations.ROW_DATA_TYPE1;
+import static org.apache.hudi.utils.TestConfigurations.ROW_TYPE;
+import static org.apache.hudi.utils.TestConfigurations.set_row_type;
+import static org.apache.hudi.utils.TestData.insertRow;
 import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -102,6 +111,85 @@ public class TestCustomInputFormat {
 
     // refresh the input format
     this.tableSource.reset();
+    inputFormat = this.tableSource.getInputFormat();
+
+    result = readData(inputFormat);
+
+    actual = TestData.rowDataToString(result);
+    expected = "["
+        + "+I[id1, Danny, 24, 1970-01-01T00:00:00.001, par1], "
+        + "+I[id2, Stephen, 34, 1970-01-01T00:00:00.002, par1], "
+        + "+I[id3, Julian, 54, 1970-01-01T00:00:00.003, par2], "
+        + "+I[id4, Fabian, 32, 1970-01-01T00:00:00.004, par2], "
+        + "+I[id5, Sophia, 18, 1970-01-01T00:00:00.005, par3], "
+        + "+I[id6, Emma, 20, 1970-01-01T00:00:00.006, par3], "
+        + "+I[id7, Bob, 44, 1970-01-01T00:00:00.007, par4], "
+        + "+I[id8, Han, 56, 1970-01-01T00:00:00.008, par4], "
+        + "+I[id9, Jane, 19, 1970-01-01T00:00:00.006, par3], "
+        + "+I[id10, Ella, 38, 1970-01-01T00:00:00.007, par4], "
+        + "+I[id11, Phoebe, 52, 1970-01-01T00:00:00.008, par4]]";
+    assertThat(actual, is(expected));
+  }
+
+  @Test
+  void testRead() throws Exception {
+    Map<String, String> options = new HashMap<>();
+    // compact for each commit
+    options.put(FlinkOptions.COMPACTION_DELTA_COMMITS.key(), "10");
+    options.put(FlinkOptions.COMPACTION_ASYNC_ENABLED.key(), "true");
+    beforeEach(HoodieTableType.MERGE_ON_READ, options);
+
+    TestData.writeData(TestData.DATA_SET_INSERT, conf);
+
+    InputFormat<RowData, ?> inputFormat;
+
+    List<RowData> result;
+//    List<RowData> DATA_SET_INSERT0 = Arrays.asList(
+//        // new data
+//        insertRow(StringData.fromString("id13"), StringData.fromString("Mid"), 22,
+//                  TimestampData.fromEpochMillis(10), StringData.fromString("par1"))
+//    );
+//    TestData.writeData(DATA_SET_INSERT0, conf);
+
+//    String actual = TestData.rowDataToString(result);
+//    String expected = TestData.rowDataToString(TestData.DATA_SET_INSERT);
+//    assertThat(actual, is(expected));
+    String actual;
+    String expected;
+
+    // write another commit to read again
+    conf.setString(FlinkOptions.SOURCE_AVRO_SCHEMA_PATH, Objects.requireNonNull(Thread.currentThread().getContextClassLoader().getResource("test_read_schema1.avsc")).toString());
+    set_row_type();
+    List<RowData> DATA_SET_INSERT1 = Arrays.asList(
+        // new data
+        insertRow(StringData.fromString("id9"), StringData.fromString("Jane"),
+                  TimestampData.fromEpochMillis(6), StringData.fromString("par3")),
+        insertRow(StringData.fromString("id10"), StringData.fromString("Ella"),
+                  TimestampData.fromEpochMillis(7), StringData.fromString("par4")),
+        insertRow(StringData.fromString("id11"), StringData.fromString("Phoebe"),
+                  TimestampData.fromEpochMillis(8), StringData.fromString("par4"))
+    );
+    TestData.writeData(DATA_SET_INSERT1, conf);
+
+//    List<RowData> DATA_SET_INSERT2 = Arrays.asList(
+//        // new data
+//        insertRow(StringData.fromString("id12"), StringData.fromString("Jian"),
+//                  TimestampData.fromEpochMillis(9), StringData.fromString("par3"))
+//    );
+//    TestData.writeData(DATA_SET_INSERT2, conf);
+
+    // refresh the input format
+    this.tableSource.reset();
+
+    ResolvedSchema TABLE_SCHEMA1 = SchemaBuilder.instance()
+        .fields(ROW_TYPE.getFieldNames(), ROW_DATA_TYPE1.getChildren())
+        .build();
+    this.tableSource = new HoodieTableSource(
+        TABLE_SCHEMA1,
+        new Path(tempFile.getAbsolutePath()),
+        Collections.singletonList("partition"),
+        "default",
+        conf);
     inputFormat = this.tableSource.getInputFormat();
 
     result = readData(inputFormat);
