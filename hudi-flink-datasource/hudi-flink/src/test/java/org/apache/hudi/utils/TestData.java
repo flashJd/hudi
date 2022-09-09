@@ -339,7 +339,7 @@ public class TestData {
    */
   public static String rowDataToString(List<RowData> rows) {
     DataStructureConverter<Object, Object> converter =
-        DataStructureConverters.getConverter(TestConfigurations.ROW_DATA_TYPE1);
+        DataStructureConverters.getConverter(TestConfigurations.ROW_DATA_TYPE2);
     return rows.stream()
         .sorted(Comparator.comparing(o -> toIdSafely(o.getString(0))))
         .map(row -> converter.toExternal(row).toString())

@@ -47,10 +47,18 @@ public class TestConfigurations {
   private TestConfigurations() {
   }
 
-  public static final DataType ROW_DATA_TYPE = DataTypes.ROW(
+  public static final DataType ROW_DATA_TYPE0 = DataTypes.ROW(
           DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),// record key
           DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
           DataTypes.FIELD("age", DataTypes.INT()),
+          DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
+          DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
+      .notNull();
+
+  public static final DataType ROW_DATA_TYPE = DataTypes.ROW(
+          DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),// record key
+          DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
+          DataTypes.FIELD("age", DataTypes.BIGINT()),
           DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
           DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
       .notNull();
@@ -62,10 +70,30 @@ public class TestConfigurations {
           DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
       .notNull();
 
+  public static final DataType ROW_DATA_TYPE2 = DataTypes.ROW(
+          DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),// record key
+          DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
+          DataTypes.FIELD("age", DataTypes.DOUBLE()),
+          DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
+          DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
+      .notNull();
+
   public static RowType ROW_TYPE = (RowType) ROW_DATA_TYPE.getLogicalType();
 
   public static void set_row_type() {
     ROW_TYPE = (RowType) ROW_DATA_TYPE1.getLogicalType();
+    SERIALIZER = new RowDataSerializer(ROW_TYPE);
+    return;
+  }
+
+  public static void set_row_type2() {
+    ROW_TYPE = (RowType) ROW_DATA_TYPE2.getLogicalType();
+    SERIALIZER = new RowDataSerializer(ROW_TYPE);
+    return;
+  }
+
+  public static void set_row_type0() {
+    ROW_TYPE = (RowType) ROW_DATA_TYPE0.getLogicalType();
     SERIALIZER = new RowDataSerializer(ROW_TYPE);
     return;
   }
