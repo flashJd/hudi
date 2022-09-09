@@ -103,6 +103,48 @@ class TestSqlConf extends HoodieSparkSqlTestBase with BeforeAndAfter {
     }
   }
 
+  test("Test Hudi Conf read optimized") {
+    withTempDir { tmp =>
+      val tableName = generateTableName
+      val tablePath = tmp.getCanonicalPath
+      val partitionVal = "2021"
+      // Create table
+      spark.sql(
+        s"""
+           |create table $tableName (
+           |  id int,
+           |  name string,
+           |  price double,
+           |  ts long,
+           |  year string
+           |) using hudi
+           | partitioned by (year)
+           | location '$tablePath'
+           | options (
+           |  type = 'mor',
+           |  primaryKey ='id',
+           |  preCombineField = 'ts'
+           | )
+       """.stripMargin)
+
+      // First insert a new record
+      spark.sql(s"insert into $tableName values(1, 'a1', 10, 1000, $partitionVal)")
+
+      // Then update record
+      spark.sql(s"insert into $tableName values(1, 'a2', 10, 1000, $partitionVal)")
+
+      checkAnswer(s"select id, name, price, ts, year from $tableName")(
+        Seq(1, "a2", 10.0, 1000, partitionVal)
+      )
+
+      spark.sql("set hoodie.datasource.query.type=read_optimized")
+      spark.catalog.refreshTable(tableName)
+      checkAnswer(s"select id, name, price, ts, year from $tableName")(
+        Seq(1, "a1", 10.0, 1000, partitionVal)
+      )
+    }
+  }
+
   before {
     val testPropsFilePath = new File("src/test/resources/external-config").getAbsolutePath
     setEnv(DFSPropertiesConfiguration.CONF_FILE_DIR_ENV_NAME, testPropsFilePath)

@@ -73,6 +73,14 @@ class DefaultSource extends RelationProvider
                               schema: StructType): BaseRelation = {
     val path = optParams.get("path")
     val readPathsStr = optParams.get(DataSourceReadOptions.READ_PATHS.key)
+    val sessionQueryType = sqlContext.sparkSession.conf.get(QUERY_TYPE.key, "")
+    val modifiedOptParams = (if (sessionQueryType != "") {
+      Map(
+        QUERY_TYPE.key -> sessionQueryType
+      )
+    } else {
+      Map()
+    }) ++ optParams
 
     if (path.isEmpty && readPathsStr.isEmpty) {
       throw new HoodieException(s"'path' or '$READ_PATHS' or both must be specified.")
@@ -96,7 +104,7 @@ class DefaultSource extends RelationProvider
       )
     } else {
       Map()
-    }) ++ DataSourceOptionsHelper.parametersWithReadDefaults(optParams)
+    }) ++ DataSourceOptionsHelper.parametersWithReadDefaults(modifiedOptParams)
 
     // Get the table base path
     val tablePath = if (globPaths.nonEmpty) {
