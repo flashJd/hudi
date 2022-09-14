@@ -27,10 +27,6 @@
     "type" : [ "null", "string" ],
     "default" : null
   }, {
-    "name" : "age",
-    "type" : [ "null", "long" ],
-    "default" : null
-  }, {
     "name" : "ts",
     "type" : [ "null", {
       "type" : "long",
