@@ -103,6 +103,12 @@ public class FlinkOptions extends HoodieConfig {
           .defaultValue(HoodieCommonConfig.SCHEMA_EVOLUTION_ENABLE.defaultValue())
           .withDescription(HoodieCommonConfig.SCHEMA_EVOLUTION_ENABLE.doc());
 
+  public static final ConfigOption<Boolean> RECONCILE_SCHEMA = ConfigOptions
+          .key(HoodieCommonConfig.RECONCILE_SCHEMA.key())
+          .booleanType()
+          .defaultValue(HoodieCommonConfig.RECONCILE_SCHEMA.defaultValue())
+          .withDescription(HoodieCommonConfig.RECONCILE_SCHEMA.doc());
+
   // ------------------------------------------------------------------------
   //  Metadata table Options
   // ------------------------------------------------------------------------

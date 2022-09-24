@@ -209,10 +209,8 @@ public class MergeOnReadInputFormat
       // log files only
       if (OptionsResolver.emitChangelog(conf)) {
         this.iterator = new LogFileOnlyIterator(getUnMergedLogFileIterator(split));
-        projectRecordIterator();
       } else {
         this.iterator = new LogFileOnlyIterator(getLogFileIterator(split));
-        projectRecordIterator();
       }
     } else if (split.getMergeType().equals(FlinkOptions.REALTIME_SKIP_MERGE)) {
       RecordIterator baseFileIterator = new BaseFileOnlyIterator(getRequiredSchemaReader(split.getBasePath().get()));

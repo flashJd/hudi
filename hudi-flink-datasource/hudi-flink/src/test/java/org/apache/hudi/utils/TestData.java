@@ -18,6 +18,7 @@
 
 package org.apache.hudi.utils;
 
+import org.apache.flink.table.types.DataType;
 import org.apache.hudi.client.common.HoodieFlinkEngineContext;
 import org.apache.hudi.common.config.HoodieCommonConfig;
 import org.apache.hudi.common.fs.FSUtils;
@@ -344,6 +345,15 @@ public class TestData {
         .sorted(Comparator.comparing(o -> toIdSafely(o.getString(0))))
         .map(row -> converter.toExternal(row).toString())
         .collect(Collectors.toList()).toString();
+  }
+
+  public static String rowDataToString(List<RowData> rows, DataType dataType) {
+    DataStructureConverter<Object, Object> converter =
+            DataStructureConverters.getConverter(dataType);
+    return rows.stream()
+            .sorted(Comparator.comparing(o -> toIdSafely(o.getString(0))))
+            .map(row -> converter.toExternal(row).toString())
+            .collect(Collectors.toList()).toString();
   }
 
   /**

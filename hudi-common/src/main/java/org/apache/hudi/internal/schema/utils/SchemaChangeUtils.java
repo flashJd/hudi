@@ -63,7 +63,7 @@ public class SchemaChangeUtils {
         return dsr == Types.LongType.get() || dsr == Types.FloatType.get()
             || dsr == Types.DoubleType.get() || dsr == Types.StringType.get() || dsr.typeId() == Type.TypeID.DECIMAL;
       case LONG:
-        return dsr == Types.FloatType.get() || dsr == Types.DoubleType.get() || dsr == Types.StringType.get() || dsr.typeId() == Type.TypeID.DECIMAL;
+        return dsr == Types.FloatType.get() || dsr == Types.DoubleType.get() || dsr == Types.StringType.get() || dsr.typeId() == Type.TypeID.DECIMAL || dsr == Types.IntType.get();
       case FLOAT:
         return dsr == Types.DoubleType.get() || dsr == Types.StringType.get() || dsr.typeId() == Type.TypeID.DECIMAL;
       case DOUBLE:

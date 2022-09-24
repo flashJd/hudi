@@ -116,6 +116,13 @@ public final class CastMap implements Serializable {
     LogicalTypeRoot from = fromType.getTypeRoot();
     LogicalTypeRoot to = toType.getTypeRoot();
     switch (to) {
+      case INTEGER: {
+        // Long => Integer
+        if (from == BIGINT) {
+          return val -> ((Number) val).intValue();
+        }
+        break;
+      }
       case BIGINT: {
         // Integer => Long
         if (from == INTEGER) {

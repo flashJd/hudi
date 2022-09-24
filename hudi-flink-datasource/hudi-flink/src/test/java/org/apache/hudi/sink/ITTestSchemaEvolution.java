@@ -18,6 +18,7 @@
 
 package org.apache.hudi.sink;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.hudi.client.HoodieFlinkWriteClient;
 import org.apache.hudi.common.table.HoodieTableConfig;
 import org.apache.hudi.common.util.Option;
@@ -46,6 +47,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -55,46 +57,52 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.hudi.internal.schema.action.TableChange.ColumnPositionChange.ColumnPositionType.AFTER;
-import static org.apache.hudi.utils.TestConfigurations.ROW_TYPE;
-import static org.apache.hudi.utils.TestConfigurations.ROW_TYPE_EVOLUTION;
+import static org.apache.hudi.utils.TestConfigurations.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class ITTestSchemaEvolution extends AbstractTestBase {
-  @TempDir File tempFile;
+  File tempFile;
   StreamExecutionEnvironment env;
   StreamTableEnvironment tEnv;
 
   String[] expectedMergedResult = new String[] {
       "+I[Danny, 10000.1, 23]",
-      "+I[Stephen, null, 33]",
+      "+I[Stephen, null, -1794867294]",
       "+I[Julian, 30000.3, 53]",
       "+I[Fabian, null, 31]",
       "+I[Sophia, null, 18]",
       "+I[Emma, null, 20]",
       "+I[Bob, null, 44]",
       "+I[Han, null, 56]",
-      "+I[Alice, 90000.9, unknown]"
+      "+I[Alice, 90000.9, 77]"
   };
 
   String[] expectedUnMergedResult = new String[] {
       "+I[Danny, null, 23]",
-      "+I[Stephen, null, 33]",
+      "+I[Stephen, null, -1794867294]",
       "+I[Julian, null, 53]",
       "+I[Fabian, null, 31]",
       "+I[Sophia, null, 18]",
       "+I[Emma, null, 20]",
       "+I[Bob, null, 44]",
       "+I[Han, null, 56]",
-      "+I[Alice, 90000.9, unknown]",
+      "+I[Alice, 90000.9, 77]",
       "+I[Danny, 10000.1, 23]",
       "+I[Julian, 30000.3, 53]"
   };
 
+  void beforeEach() throws IOException {
+    tempFile = new File("./hudi_table");
+    FileUtils.deleteDirectory(tempFile);
+    tempFile.mkdirs();
+  }
+
   @BeforeEach
-  public void setUp() {
+  public void setUp() throws IOException {
     env = StreamExecutionEnvironment.getExecutionEnvironment();
     env.setParallelism(1);
     tEnv = StreamTableEnvironment.create(env);
+    beforeEach();
   }
 
   @Test
@@ -158,7 +166,7 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
     OptionMap optionMap = defaultOptionMap(tempFile.getAbsolutePath());
     optionMap.put(FlinkOptions.TABLE_TYPE.key(), FlinkOptions.TABLE_TYPE_MERGE_ON_READ);
     optionMap.put(FlinkOptions.COMPACTION_DELTA_COMMITS.key(), 1);
-    testRead(optionMap, new String[0]);
+    testRead(optionMap);
     try (HoodieFlinkWriteClient<?> writeClient = StreamerUtil.createWriteClient(optionMap.toConfig())) {
       Option<String> compactionInstant = writeClient.scheduleCompaction(Option.empty());
       writeClient.compact(compactionInstant.get());
@@ -194,7 +202,7 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
         + "create table t1 ("
         + "  uuid string,"
         + "  name string,"
-        + "  age int,"
+        + "  age bigint,"
         + "  ts timestamp,"
         + "  `partition` string"
         + ") partitioned by (`partition`) with (" + optionMap + ")"
@@ -204,12 +212,12 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
         + "insert into t1 select "
         + "  cast(uuid as string),"
         + "  cast(name as string),"
-        + "  cast(age as int),"
+        + "  cast(age as bigint),"
         + "  cast(ts as timestamp),"
         + "  cast(`partition` as string) "
         + "from (values "
         + "  ('id1', 'Danny', 23, '2000-01-01 00:00:01', 'par1'),"
-        + "  ('id2', 'Stephen', 33, '2000-01-01 00:00:02', 'par1'),"
+        + "  ('id2', 'Stephen', 2500100002, '2000-01-01 00:00:02', 'par1'),"
         + "  ('id3', 'Julian', 53, '2000-01-01 00:00:03', 'par2'),"
         + "  ('id4', 'Fabian', 31, '2000-01-01 00:00:04', 'par2'),"
         + "  ('id5', 'Sophia', 18, '2000-01-01 00:00:05', 'par3'),"
@@ -227,7 +235,7 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
       Schema doubleType = SchemaBuilder.unionOf().nullType().and().doubleType().endUnion();
       writeClient.addColumn("salary", doubleType, null, "age", AFTER);
       writeClient.renameColumn("name", "first_name");
-      writeClient.updateColumnType("age", Types.StringType.get());
+      writeClient.updateColumnType("age", Types.IntType.get());
     }
 
     tEnv.executeSql("drop table t1");
@@ -238,7 +246,7 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
         + "create table t1 ("
         + "  uuid string,"
         + "  first_name string,"
-        + "  age string,"
+        + "  age int,"
         + "  salary double,"
         + "  ts timestamp,"
         + "  `partition` string"
@@ -249,14 +257,14 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
         + "insert into t1 select "
         + "  cast(uuid as string),"
         + "  cast(first_name as string),"
-        + "  cast(age as string),"
+        + "  cast(age as int),"
         + "  cast(salary as double),"
         + "  cast(ts as timestamp),"
         + "  cast(`partition` as string) "
         + "from (values "
-        + "  ('id1', 'Danny', '23', 10000.1, '2000-01-01 00:00:01', 'par1'),"
-        + "  ('id9', 'Alice', 'unknown', 90000.9, '2000-01-01 00:00:09', 'par1'),"
-        + "  ('id3', 'Julian', '53', 30000.3, '2000-01-01 00:00:03', 'par2')"
+        + "  ('id1', 'Danny', 23, 10000.1, '2000-01-01 00:00:01', 'par1'),"
+        + "  ('id9', 'Alice', 77, 90000.9, '2000-01-01 00:00:09', 'par1'),"
+        + "  ('id3', 'Julian', 53, 30000.3, '2000-01-01 00:00:03', 'par2')"
         + ") as A(uuid, first_name, age, salary, ts, `partition`)"
     ).await();
 
@@ -277,7 +285,7 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
         KeyGeneratorOptions.HIVE_STYLE_PARTITIONING_ENABLE.key(), true,
         HoodieWriteConfig.KEYGENERATOR_CLASS_NAME.key(), ComplexAvroKeyGenerator.class.getName(),
         FlinkOptions.WRITE_BATCH_SIZE.key(), 0.000001, // trigger flush after each record
-        FlinkOptions.SOURCE_AVRO_SCHEMA.key(), AvroSchemaConverter.convertToSchema(ROW_TYPE),
+        FlinkOptions.SOURCE_AVRO_SCHEMA.key(), AvroSchemaConverter.convertToSchema(ROW_TYPE_AGE_LONG),
         FlinkOptions.READ_TASKS.key(), 1,
         FlinkOptions.WRITE_TASKS.key(), 1,
         FlinkOptions.INDEX_BOOTSTRAP_TASKS.key(), 1,

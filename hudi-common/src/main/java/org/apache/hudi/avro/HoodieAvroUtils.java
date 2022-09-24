@@ -880,6 +880,8 @@ public class HoodieAvroUtils {
       case INT:
         if (newSchema.getLogicalType() == LogicalTypes.date() && oldSchema.getType() == Schema.Type.STRING) {
           return fromJavaDate(java.sql.Date.valueOf(oldValue.toString()));
+        } else if(oldSchema.getType() == Schema.Type.LONG) {
+          return ((Long) oldValue).intValue();
         }
         break;
       case LONG:

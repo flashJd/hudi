@@ -185,7 +185,7 @@ public class FSUtils {
     if (isLogFile(fullFileName)) {
       return fullFileName.split("_")[1].split("\\.")[0];
     }
-    return fullFileName.split("_")[2].split("\\.")[0];
+    return fullFileName.substring(fullFileName.lastIndexOf('_') + 1).split("\\.")[0];
   }
 
   public static long getFileSize(FileSystem fs, Path path) throws IOException {

@@ -55,7 +55,48 @@ public class TestConfigurations {
           DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
       .notNull();
 
-  public static final RowType ROW_TYPE = (RowType) ROW_DATA_TYPE.getLogicalType();
+  public static DataType ROW_DATA_TYPE_ADD_SCORE = DataTypes.ROW(
+          DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),// record key
+          DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
+          DataTypes.FIELD("age", DataTypes.INT()),
+          DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
+          DataTypes.FIELD("partition", DataTypes.VARCHAR(10)),
+          DataTypes.FIELD("score", DataTypes.INT()))
+      .notNull();
+
+  public static DataType ROW_DATA_TYPE_DEL_AGE = DataTypes.ROW(
+          DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),// record key
+          DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
+          DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
+          DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
+      .notNull();
+
+  public static final DataType ROW_DATA_TYPE_CHANGE_AGE_INT2DOUBLE = DataTypes.ROW(
+          DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),// record key
+          DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
+          DataTypes.FIELD("age", DataTypes.DOUBLE()),
+          DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
+          DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
+      .notNull();
+
+  public static RowType ROW_TYPE = (RowType) ROW_DATA_TYPE.getLogicalType();
+
+
+  public static void set_row_type(DataType dataType) {
+    ROW_TYPE = (RowType) dataType.getLogicalType();
+    SERIALIZER = new RowDataSerializer(ROW_TYPE);
+    return;
+  }
+
+  public static final DataType ROW_DATA_TYPE_AGE_LONG = DataTypes.ROW(
+          DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),// record key
+          DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
+          DataTypes.FIELD("age", DataTypes.BIGINT()),
+          DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
+          DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
+      .notNull();
+
+  public static final RowType ROW_TYPE_AGE_LONG = (RowType) ROW_DATA_TYPE_AGE_LONG.getLogicalType();
 
   public static final ResolvedSchema TABLE_SCHEMA = SchemaBuilder.instance()
       .fields(ROW_TYPE.getFieldNames(), ROW_DATA_TYPE.getChildren())
@@ -87,7 +128,7 @@ public class TestConfigurations {
   public static final DataType ROW_DATA_TYPE_EVOLUTION = DataTypes.ROW(
       DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),
       DataTypes.FIELD("first_name", DataTypes.VARCHAR(10)), // renamed
-      DataTypes.FIELD("age", DataTypes.VARCHAR(10)), // changed type
+      DataTypes.FIELD("age", DataTypes.INT()), // changed type
       DataTypes.FIELD("salary", DataTypes.DOUBLE()), // new field
       DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)),
       DataTypes.FIELD("partition", DataTypes.VARCHAR(10))).notNull();
@@ -219,7 +260,7 @@ public class TestConfigurations {
         + ")";
   }
 
-  public static final RowDataSerializer SERIALIZER = new RowDataSerializer(ROW_TYPE);
+  public static RowDataSerializer SERIALIZER = new RowDataSerializer(ROW_TYPE);
 
   public static Configuration getDefaultConf(String tablePath) {
     Configuration conf = new Configuration();
