@@ -37,6 +37,7 @@ import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.configuration.FlinkOptions;
 import org.apache.hudi.configuration.HadoopConfigurations;
 import org.apache.hudi.exception.HoodieException;
+import org.apache.hudi.internal.schema.InternalSchema;
 import org.apache.hudi.sink.bootstrap.aggregate.BootstrapAggFunction;
 import org.apache.hudi.sink.meta.CkpMetadata;
 import org.apache.hudi.table.HoodieTable;
@@ -197,7 +198,8 @@ public class BootstrapOperator<I, O extends HoodieRecord<?>>
 
     if (latestCommitTime.isPresent()) {
       BaseFileUtils fileUtils = BaseFileUtils.getInstance(this.hoodieTable.getBaseFileFormat());
-      Schema schema = new TableSchemaResolver(this.hoodieTable.getMetaClient()).getTableAvroSchema();
+      TableSchemaResolver schemaResolver = new TableSchemaResolver(this.hoodieTable.getMetaClient());
+      Schema schema = schemaResolver.getTableAvroSchema();
 
       List<FileSlice> fileSlices = this.hoodieTable.getSliceView()
           .getLatestMergedFileSlicesBeforeOrOn(partitionPath, latestCommitTime.get().getTimestamp())
@@ -229,7 +231,9 @@ public class BootstrapOperator<I, O extends HoodieRecord<?>>
             .filter(logFile -> isValidFile(logFile.getFileStatus()))
             .map(logFile -> logFile.getPath().toString())
             .collect(toList());
-        HoodieMergedLogRecordScanner scanner = FormatUtils.logScanner(logPaths, schema, latestCommitTime.get().getTimestamp(),
+        InternalSchema internalSchema = schemaResolver.getTableInternalSchemaFromCommitMetadata()
+            .orElse(InternalSchema.getEmptyInternalSchema());
+        HoodieMergedLogRecordScanner scanner = FormatUtils.logScanner(logPaths, schema, internalSchema, latestCommitTime.get().getTimestamp(),
             writeConfig, hadoopConf);
 
         try {

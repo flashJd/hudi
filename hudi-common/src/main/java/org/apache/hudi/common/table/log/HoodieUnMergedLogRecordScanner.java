@@ -22,6 +22,7 @@ import org.apache.hudi.common.model.DeleteRecord;
 import org.apache.hudi.common.model.HoodieRecord;
 import org.apache.hudi.common.model.HoodieRecordPayload;
 import org.apache.hudi.common.util.Option;
+import org.apache.hudi.internal.schema.InternalSchema;
 
 import org.apache.avro.Schema;
 import org.apache.hadoop.fs.FileSystem;
@@ -37,8 +38,8 @@ public class HoodieUnMergedLogRecordScanner extends AbstractHoodieLogRecordReade
 
   private HoodieUnMergedLogRecordScanner(FileSystem fs, String basePath, List<String> logFilePaths, Schema readerSchema,
                                          String latestInstantTime, boolean readBlocksLazily, boolean reverseReader, int bufferSize,
-                                         LogRecordScannerCallback callback, Option<InstantRange> instantRange) {
-    super(fs, basePath, logFilePaths, readerSchema, latestInstantTime, readBlocksLazily, reverseReader, bufferSize, instantRange, false);
+                                         LogRecordScannerCallback callback, Option<InstantRange> instantRange, InternalSchema internalSchema) {
+    super(fs, basePath, logFilePaths, readerSchema, latestInstantTime, readBlocksLazily, reverseReader, bufferSize, instantRange, false, true, Option.empty(), internalSchema);
     this.callback = callback;
   }
 
@@ -84,6 +85,7 @@ public class HoodieUnMergedLogRecordScanner extends AbstractHoodieLogRecordReade
     private Option<InstantRange> instantRange = Option.empty();
     // specific configurations
     private LogRecordScannerCallback callback;
+    private InternalSchema internalSchema = InternalSchema.getEmptyInternalSchema();
 
     public Builder withFileSystem(FileSystem fs) {
       this.fs = fs;
@@ -135,10 +137,15 @@ public class HoodieUnMergedLogRecordScanner extends AbstractHoodieLogRecordReade
       return this;
     }
 
+    public Builder withInternalSchema(InternalSchema internalSchema) {
+      this.internalSchema = internalSchema;
+      return this;
+    }
+
     @Override
     public HoodieUnMergedLogRecordScanner build() {
       return new HoodieUnMergedLogRecordScanner(fs, basePath, logFilePaths, readerSchema,
-          latestInstantTime, readBlocksLazily, reverseReader, bufferSize, callback, instantRange);
+          latestInstantTime, readBlocksLazily, reverseReader, bufferSize, callback, instantRange, internalSchema);
     }
   }
 }

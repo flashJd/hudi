@@ -21,6 +21,7 @@ package org.apache.hudi.configuration;
 import org.apache.hudi.client.clustering.plan.strategy.FlinkSizeBasedClusteringPlanStrategy;
 import org.apache.hudi.common.config.ConfigClassProperty;
 import org.apache.hudi.common.config.ConfigGroups;
+import org.apache.hudi.common.config.HoodieCommonConfig;
 import org.apache.hudi.common.config.HoodieConfig;
 import org.apache.hudi.common.model.HoodieCleaningPolicy;
 import org.apache.hudi.common.model.HoodieTableType;
@@ -95,6 +96,12 @@ public class FlinkOptions extends HoodieConfig {
           + "2). The source try to emit every changes of a record.\n"
           + "The semantics is best effort because the compaction job would finally merge all changes of a record into one.\n"
           + " default false to have UPSERT semantics");
+
+  public static final ConfigOption<Boolean> SCHEMA_EVOLUTION_ENABLED = ConfigOptions
+          .key(HoodieCommonConfig.SCHEMA_EVOLUTION_ENABLE.key())
+          .booleanType()
+          .defaultValue(HoodieCommonConfig.SCHEMA_EVOLUTION_ENABLE.defaultValue())
+          .withDescription(HoodieCommonConfig.SCHEMA_EVOLUTION_ENABLE.doc());
 
   // ------------------------------------------------------------------------
   //  Metadata table Options

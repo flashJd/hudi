@@ -19,6 +19,10 @@
 package org.apache.hudi.table.format.cow;
 
 import org.apache.hudi.common.fs.FSUtils;
+import org.apache.hudi.common.util.Option;
+import org.apache.hudi.internal.schema.InternalSchema;
+import org.apache.hudi.table.format.CastMap;
+import org.apache.hudi.table.format.SchemaEvolutionContext;
 import org.apache.hudi.table.format.cow.vector.reader.ParquetColumnarRowSplitReader;
 import org.apache.hudi.util.DataTypeUtils;
 
@@ -29,6 +33,7 @@ import org.apache.flink.api.common.io.compression.InflaterInputStreamFactory;
 import org.apache.flink.core.fs.FileInputSplit;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.formats.parquet.utils.SerializableConfiguration;
+import org.apache.flink.table.data.ColumnarRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.utils.PartitionPathUtils;
@@ -36,6 +41,8 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.BlockLocation;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hudi.util.RowDataCastProjection;
+import org.apache.hudi.util.RowDataProjection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,6 +54,9 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.IntStream;
+
+import static org.apache.hudi.common.model.HoodieRecord.HOODIE_META_COLUMNS;
 
 /**
  * An implementation of {@link FileInputFormat} to read {@link RowData} records
@@ -77,6 +87,9 @@ public class CopyOnWriteInputFormat extends FileInputFormat<RowData> {
   private transient ParquetColumnarRowSplitReader reader;
   private transient long currentReadCount;
 
+  private final Option<SchemaEvolutionContext> schemaEvolutionContext;
+  private Option<RowDataProjection> projection;
+
   /**
    * Files filter for determining what files/directories should be included.
    */
@@ -89,6 +102,7 @@ public class CopyOnWriteInputFormat extends FileInputFormat<RowData> {
       int[] selectedFields,
       String partDefaultName,
       long limit,
+      org.apache.flink.configuration.Configuration flinkConf,
       Configuration conf,
       boolean utcTimestamp) {
     super.setFilePaths(paths);
@@ -99,10 +113,36 @@ public class CopyOnWriteInputFormat extends FileInputFormat<RowData> {
     this.selectedFields = selectedFields;
     this.conf = new SerializableConfiguration(conf);
     this.utcTimestamp = utcTimestamp;
+    this.schemaEvolutionContext = SchemaEvolutionContext.of(flinkConf);
   }
 
   @Override
   public void open(FileInputSplit fileSplit) throws IOException {
+    String[] actualFieldNames;
+    DataType[] actualFieldTypes;
+    if (schemaEvolutionContext.isPresent()) {
+      SchemaEvolutionContext context = schemaEvolutionContext.get();
+      InternalSchema actualSchema = context.getActualSchema(fileSplit);
+      List<DataType> fieldTypes = context.getFieldTypes(actualSchema);
+      CastMap castMap = context.getCastMap(context.getQuerySchema(), actualSchema);
+      int[] selectedFields = Arrays.stream(this.selectedFields).map(pos -> pos + HOODIE_META_COLUMNS.size()).toArray();
+      if (castMap.containsAnyPos(selectedFields)) {
+        int[] requiredFields = IntStream.range(0, this.selectedFields.length).toArray();
+        projection = Option.of(new RowDataCastProjection(
+            SchemaEvolutionContext.project(fieldTypes, selectedFields),
+            requiredFields,
+            castMap.withNewPositions(selectedFields, requiredFields)));
+      } else {
+        projection = Option.empty();
+      }
+      actualFieldNames = context.getFieldNames(actualSchema).stream().skip(HOODIE_META_COLUMNS.size()).toArray(String[]::new);
+      actualFieldTypes = fieldTypes.stream().skip(HOODIE_META_COLUMNS.size()).toArray(DataType[]::new);
+    } else {
+      actualFieldNames = fullFieldNames;
+      actualFieldTypes = fullFieldTypes;
+      projection = Option.empty();
+    }
+
     // generate partition specs.
     List<String> fieldNameList = Arrays.asList(fullFieldNames);
     LinkedHashMap<String, String> partSpec = PartitionPathUtils.extractPartitionSpecFromPath(
@@ -116,8 +156,8 @@ public class CopyOnWriteInputFormat extends FileInputFormat<RowData> {
         utcTimestamp,
         true,
         conf.conf(),
-        fullFieldNames,
-        fullFieldTypes,
+        actualFieldNames,
+        actualFieldTypes,
         partObjects,
         selectedFields,
         2048,
@@ -276,7 +316,8 @@ public class CopyOnWriteInputFormat extends FileInputFormat<RowData> {
   @Override
   public RowData nextRecord(RowData reuse) {
     currentReadCount++;
-    return reader.nextRecord();
+    ColumnarRowData rowData = reader.nextRecord();
+    return projection.map(pr -> pr.project(rowData)).orElse(rowData);
   }
 
   @Override
