@@ -59,8 +59,40 @@ class TestSpark3DDL extends HoodieSparkSqlTestBase {
          | (2,2,12,100002,102.02,1002.0002,100002.0002,'a000002','2021-12-25','2021-12-25 12:02:02',true,'a02','2021-12-25'),
          | (3,3,13,100003,103.03,1003.0003,100003.0003,'a000003','2021-12-25','2021-12-25 12:03:03',false,'a03','2021-12-25'),
          | (4,4,14,100004,104.04,1004.0004,100004.0004,'a000004','2021-12-26','2021-12-26 12:04:04',true,'a04','2021-12-26'),
-         | (5,5,15,100005,105.05,1005.0005,100005.0005,'a000005','2021-12-26','2021-12-26 12:05:05',false,'a05','2021-12-26')
+         | (5,5,15,100005,105.05,1005.0005,100005.0005,'a000005','2021-12-26','2021-12-26 12:05:05',false,'a05','2021-12-26'),
+         | (7,7,17,2500100002,107.07,1007.0007,100007.0007,'a000007',DATE'2021-12-26',TIMESTAMP'2021-12-26 12:07:07',false,X'a07',TIMESTAMP'2021-12-26')
          |""".stripMargin)
+  }
+
+  test("Test change data long2int") {
+    withTempDir { tmp =>
+      Seq("cow", "mor").foreach { tableType =>
+        val tableName = generateTableName
+        val tablePath = s"${new Path(tmp.getCanonicalPath, tableName).toUri.toString}"
+        if (HoodieSparkUtils.gteqSpark3_1) {
+          spark.sql("set hoodie.schema.on.read.enable=true")
+          // NOTE: This is required since as this tests use type coercions which were only permitted in Spark 2.x
+          //       and are disallowed now by default in Spark 3.x
+          spark.sql("set spark.sql.storeAssignmentPolicy=legacy")
+          createAndPreparePartitionTable(spark, tableName, tablePath, tableType)
+
+          spark.sql(s"alter table $tableName alter column col1 type int")
+          checkAnswer(spark.sql(s"select col1 from $tableName where id = 7").collect())(
+            Seq(-1794867294)
+          )
+          spark.sql(
+            s"""
+               | insert into $tableName values
+               | (7,7,17,100007,107.07,1007.0007,100007.0007,'a000007',DATE'2021-12-26',TIMESTAMP'2021-12-26 12:07:07',false,X'a07',TIMESTAMP'2021-12-26')
+               |""".stripMargin)
+          checkAnswer(spark.sql(s"select col1 from $tableName where id = 7").collect())(
+            Seq(100007)
+          )
+          spark.sessionState.catalog.dropTable(TableIdentifier(tableName), true, true)
+          spark.sessionState.catalog.refreshTable(TableIdentifier(tableName))
+        }
+      }
+    }
   }
 
   test("Test multi change data type") {

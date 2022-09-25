@@ -83,7 +83,7 @@ class CustomTestTimeTravelQuery extends HoodieClientTestBase {
   @Test
   def testTimeTravelQueryWithImplicitSchemaEvolution(): Unit = {
     metaClient = HoodieTableMetaClient.withPropertyBuilder
-      .setTableType(HoodieTableType.COPY_ON_WRITE)
+      .setTableType(HoodieTableType.MERGE_ON_READ)
       .setTableName("aa")
       .setRecordKeyFields("uuid")
       .setPayloadClass(classOf[HoodieAvroPayload])
@@ -94,8 +94,17 @@ class CustomTestTimeTravelQuery extends HoodieClientTestBase {
     val _spark = spark
     import _spark.implicits._
 
+    // NOTE: This is required since as this tests use type coercions which were only permitted in Spark 2.x
+    //       and are disallowed now by default in Spark 3.x
+    spark.sql("set spark.sql.storeAssignmentPolicy=legacy")
     val firstCommit = metaClient.getActiveTimeline.filterCompletedInstants().nthInstant(0).get().getTimestamp
     val secondCommit = metaClient.getActiveTimeline.filterCompletedInstants().lastInstant().get().getTimestamp
+
+    spark.read.format("hudi")
+      .option(DataSourceReadOptions.TIME_TRAVEL_AS_OF_INSTANT.key, firstCommit)
+      .option(HoodieCommonConfig.SCHEMA_EVOLUTION_ENABLE.key, "true")
+      .load(basePath)
+      .show()
 
     // Query as of secondCommit
     spark.read.format("hudi")
@@ -104,15 +113,10 @@ class CustomTestTimeTravelQuery extends HoodieClientTestBase {
       .load(basePath)
       .show()
     // assertEquals(Row(1, "a1", 10, 1000), result1)
-
-    spark.read.format("hudi")
-      .option(DataSourceReadOptions.TIME_TRAVEL_AS_OF_INSTANT.key, firstCommit)
-      .load(basePath)
-      .show()
   }
 
   @Test
-  def testTimeTravelQueryWithExplicitSchemaEvolution(): Unit = {
+  def testTimeTravelQueryWithCommonSchemaEvolution(): Unit = {
     metaClient = HoodieTableMetaClient.withPropertyBuilder
       .setTableType(HoodieTableType.MERGE_ON_READ)
       .setTableName("aa")
@@ -125,14 +129,23 @@ class CustomTestTimeTravelQuery extends HoodieClientTestBase {
     val _spark = spark
     import _spark.implicits._
 
+    // NOTE: This is required since as this tests use type coercions which were only permitted in Spark 2.x
+    //       and are disallowed now by default in Spark 3.x
+    spark.sql("set spark.sql.storeAssignmentPolicy=legacy")
+
     // implicit evolution has two instants, explicit evolution has five instants, first insert, second addColumn, third renameColumn, forth updateColumnType, last insert
     metaClient.getActiveTimeline.filterCompletedInstants().getInstants()
       .filter(toJavaPredicate((instance:HoodieInstant) => instance.getAction != HoodieTimeline.ROLLBACK_ACTION))
+      .forEach(toJavaConsumer((instance:HoodieInstant) => println("####", instance.getTimestamp)))
+
+    metaClient.getActiveTimeline.filterCompletedInstants().getInstants()
+      .filter(toJavaPredicate((instance:HoodieInstant) => instance.getAction != HoodieTimeline.ROLLBACK_ACTION))
       .forEach(toJavaConsumer((instance:HoodieInstant) =>
-      spark.read.format("hudi")
-      .option(DataSourceReadOptions.TIME_TRAVEL_AS_OF_INSTANT.key, instance.getTimestamp)
-      .load(basePath)
-      .show()))
+        spark.read.format("hudi")
+          .option(DataSourceReadOptions.TIME_TRAVEL_AS_OF_INSTANT.key, instance.getTimestamp)
+          .option(HoodieCommonConfig.SCHEMA_EVOLUTION_ENABLE.key, "true")
+          .load(basePath)
+          .show()))
   }
 
   @ParameterizedTest
