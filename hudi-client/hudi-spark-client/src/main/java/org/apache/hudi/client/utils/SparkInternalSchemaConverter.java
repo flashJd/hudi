@@ -304,14 +304,16 @@ public class SparkInternalSchemaConverter {
   private static boolean convertIntLongType(WritableColumnVector oldV, WritableColumnVector newV, DataType newType, int len) {
     boolean isInt = oldV.dataType() instanceof IntegerType;
     if (newType instanceof LongType || newType instanceof FloatType
-        || newType instanceof DoubleType || newType instanceof StringType || newType instanceof DecimalType) {
+        || newType instanceof DoubleType || newType instanceof StringType || newType instanceof DecimalType || newType instanceof IntegerType) {
       for (int i = 0; i < len; i++) {
         if (oldV.isNullAt(i)) {
           newV.putNull(i);
           continue;
         }
-        // int/long -> long/float/double/string/decimal
-        if (newType instanceof LongType) {
+        // int/long -> int/long/float/double/string/decimal
+        if (newType instanceof IntegerType) {
+          newV.putInt(i, isInt ? oldV.getInt(i) : (int)oldV.getLong(i));
+        } else if (newType instanceof LongType) {
           newV.putLong(i, isInt ? oldV.getInt(i) : oldV.getLong(i));
         } else if (newType instanceof FloatType) {
           newV.putFloat(i, isInt ? oldV.getInt(i) : oldV.getLong(i));

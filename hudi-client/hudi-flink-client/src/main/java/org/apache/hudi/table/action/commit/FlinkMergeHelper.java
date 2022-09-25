@@ -85,7 +85,7 @@ public class FlinkMergeHelper<T extends HoodieRecordPayload> extends BaseMergeHe
       if (baseFile.getBootstrapBaseFile().isPresent()) {
         readerIterator = getMergingIterator(table, mergeHandle, baseFile, reader, readSchema, externalSchemaTransformation);
       } else {
-        readerIterator = reader.getRecordIterator(readSchema);
+        readerIterator = getRecordIterator(table, mergeHandle, baseFile, reader, readSchema);
       }
 
       ThreadLocal<BinaryEncoder> encoderCache = new ThreadLocal<>();

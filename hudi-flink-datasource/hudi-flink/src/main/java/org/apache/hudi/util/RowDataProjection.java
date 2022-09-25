@@ -37,7 +37,7 @@ public class RowDataProjection implements Serializable {
 
   private final RowData.FieldGetter[] fieldGetters;
 
-  private RowDataProjection(LogicalType[] types, int[] positions) {
+  protected RowDataProjection(LogicalType[] types, int[] positions) {
     ValidationUtils.checkArgument(types.length == positions.length,
         "types and positions should have the equal number");
     this.fieldGetters = new RowData.FieldGetter[types.length];
@@ -85,5 +85,9 @@ public class RowDataProjection implements Serializable {
       values[i] = val;
     }
     return values;
+  }
+
+  protected RowData.FieldGetter[] getFieldGetters() {
+    return fieldGetters;
   }
 }

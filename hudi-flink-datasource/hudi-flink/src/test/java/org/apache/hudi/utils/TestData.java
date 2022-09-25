@@ -20,6 +20,7 @@ package org.apache.hudi.utils;
 
 import org.apache.avro.generic.GenericRecordBuilder;
 import org.apache.avro.generic.IndexedRecord;
+import org.apache.flink.table.types.DataType;
 import org.apache.hudi.client.common.HoodieFlinkEngineContext;
 import org.apache.hudi.common.config.HoodieCommonConfig;
 import org.apache.hudi.common.fs.FSUtils;
@@ -328,6 +329,22 @@ public class TestData {
     return inserts;
   }
 
+  public static List<RowData> dataSetInsertAgeLong(int... ids) {
+    List<RowData> inserts = new ArrayList<>();
+    Arrays.stream(ids).forEach(i -> inserts.add(
+            insertRow(StringData.fromString("id" + i), StringData.fromString("Danny"), 23L,
+                    TimestampData.fromEpochMillis(i), StringData.fromString("par1"))));
+    return inserts;
+  }
+
+  public static List<RowData> dataSetAfterSchemaEvolution(int... ids) {
+    List<RowData> inserts = new ArrayList<>();
+    Arrays.stream(ids).forEach(i -> inserts.add(
+            insertRow(StringData.fromString("id" + i), 23, null,
+                    TimestampData.fromEpochMillis(i), StringData.fromString("par1"))));
+    return inserts;
+  }
+
   public static List<RowData> filterOddRows(List<RowData> rows) {
     return filterRowsByIndexPredicate(rows, i -> i % 2 != 0);
   }
@@ -367,6 +384,15 @@ public class TestData {
         .sorted(Comparator.comparing(o -> toIdSafely(o.getString(0))))
         .map(row -> converter.toExternal(row).toString())
         .collect(Collectors.toList()).toString();
+  }
+
+  public static String rowDataToString(List<RowData> rows, DataType dataType) {
+    DataStructureConverter<Object, Object> converter =
+            DataStructureConverters.getConverter(dataType);
+    return rows.stream()
+            .sorted(Comparator.comparing(o -> toIdSafely(o.getString(0))))
+            .map(row -> converter.toExternal(row).toString())
+            .collect(Collectors.toList()).toString();
   }
 
   /**
@@ -494,6 +520,13 @@ public class TestData {
         .sorted(Comparator.comparing(o -> toIdSafely(o.getField(0))))
         .collect(Collectors.toList()).toString();
     assertThat(rowsString, is(rowDataToString(expected)));
+  }
+
+  public static void assertRowsEquals(List<Row> rows, List<RowData> expected, DataType dataType) {
+    String rowsString = rows.stream()
+            .sorted(Comparator.comparing(o -> toIdSafely(o.getField(0))))
+            .collect(Collectors.toList()).toString();
+    assertThat(rowsString, is(rowDataToString(expected, dataType)));
   }
 
   /**

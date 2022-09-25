@@ -18,22 +18,8 @@
 
 package org.apache.hudi.table;
 
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.hudi.adapter.TestTableEnvs;
-import org.apache.hudi.common.model.DefaultHoodieRecordPayload;
-import org.apache.hudi.common.model.HoodieTableType;
-import org.apache.hudi.common.table.timeline.HoodieTimeline;
-import org.apache.hudi.configuration.FlinkOptions;
-import org.apache.hudi.table.catalog.HoodieHiveCatalog;
-import org.apache.hudi.table.catalog.HoodieCatalogTestUtils;
-import org.apache.hudi.util.StreamerUtil;
-import org.apache.hudi.utils.TestConfigurations;
-import org.apache.hudi.utils.TestData;
-import org.apache.hudi.utils.TestSQL;
-import org.apache.hudi.utils.TestUtils;
-import org.apache.hudi.utils.factory.CollectSinkTableFactory;
-
+import org.apache.avro.Schema;
+import org.apache.avro.SchemaBuilder;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.table.api.EnvironmentSettings;
@@ -45,9 +31,27 @@ import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CollectionUtil;
+import org.apache.hudi.adapter.TestTableEnvs;
+import org.apache.hudi.client.HoodieFlinkWriteClient;
+import org.apache.hudi.common.model.DefaultHoodieRecordPayload;
+import org.apache.hudi.common.model.HoodieTableType;
+import org.apache.hudi.common.table.timeline.HoodieTimeline;
+import org.apache.hudi.configuration.FlinkOptions;
+import org.apache.hudi.internal.schema.Types;
+import org.apache.hudi.table.catalog.HoodieCatalogTestUtils;
+import org.apache.hudi.table.catalog.HoodieHiveCatalog;
+import org.apache.hudi.util.AvroSchemaConverter;
+import org.apache.hudi.util.StreamerUtil;
+import org.apache.hudi.utils.TestConfigurations;
+import org.apache.hudi.utils.TestData;
+import org.apache.hudi.utils.TestSQL;
+import org.apache.hudi.utils.TestUtils;
+import org.apache.hudi.utils.factory.CollectSinkTableFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -68,9 +72,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.hudi.internal.schema.action.TableChange.ColumnPositionChange.ColumnPositionType.AFTER;
+import static org.apache.hudi.utils.TestConfigurations.ROW_DATA_TYPE_AGE_LONG;
+import static org.apache.hudi.utils.TestConfigurations.ROW_DATA_TYPE_EVOLUTION;
 import static org.apache.hudi.utils.TestConfigurations.catalog;
+import static org.apache.hudi.utils.TestConfigurations.set_row_type;
 import static org.apache.hudi.utils.TestConfigurations.sql;
 import static org.apache.hudi.utils.TestData.assertRowsEquals;
+import static org.apache.hudi.utils.TestData.insertRow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -1182,10 +1191,10 @@ public class ITTestHoodieDataSource extends AbstractTestBase {
     String startCommit = TestUtils.getNthCompleteInstant(tempFile.getAbsolutePath(), 1, true);
     String endCommit = TestUtils.getNthCompleteInstant(tempFile.getAbsolutePath(), 2, true);
     String hoodieTableDDL = sql("t1")
-        .option(FlinkOptions.PATH, tempFile.getAbsolutePath())
-        .option(FlinkOptions.TABLE_TYPE, HoodieTableType.MERGE_ON_READ.name())
-        .option(FlinkOptions.CHANGELOG_ENABLED, true)
-        .end();
+            .option(FlinkOptions.PATH, tempFile.getAbsolutePath())
+            .option(FlinkOptions.TABLE_TYPE, HoodieTableType.MERGE_ON_READ.name())
+            .option(FlinkOptions.CHANGELOG_ENABLED, true)
+            .end();
     tableEnv.executeSql(hoodieTableDDL);
 
     List<Row> result = CollectionUtil.iterableToList(
@@ -1193,13 +1202,67 @@ public class ITTestHoodieDataSource extends AbstractTestBase {
     assertRowsEquals(result, TestData.dataSetInsert(2, 3, 4, 5, 6));
 
     final String query = String.format("select * from t1/*+ options('read.start-commit'='%s', 'read.end-commit'='%s', "
-        + "'read.data.delete.enabled'='true', 'read.batch.incremental.changelog.enabled'='true')*/", startCommit, endCommit);
+            + "'read.data.delete.enabled'='true', 'read.batch.incremental.changelog.enabled'='true')*/", startCommit, endCommit);
     List<Row> result1 = CollectionUtil.iterableToList(
         () -> tableEnv.sqlQuery(query).execute().collect());
     List<RowData> expected = TestData.dataSetInsert(3, 4);
     RowData deleteRowData = TestData.deleteRow(StringData.fromString("id1"), StringData.fromString("Danny"), 22, TimestampData.fromEpochMillis(5), StringData.fromString("par1"));
     expected.add(deleteRowData);
     assertRowsEquals(result1, expected);
+  }
+
+  @Test
+  void testIncrementalReadWithDeletesWithSchemaEvolution() throws Exception {
+    TableEnvironment tableEnv = batchTableEnv;
+    Configuration conf = TestConfigurations.getDefaultConf(tempFile.getAbsolutePath());
+    conf.removeConfig(FlinkOptions.SOURCE_AVRO_SCHEMA_PATH);
+    conf.setString(FlinkOptions.SOURCE_AVRO_SCHEMA, AvroSchemaConverter.convertToSchema(ROW_DATA_TYPE_AGE_LONG.getLogicalType()).toString());
+    conf.setString(FlinkOptions.TABLE_NAME, "t1");
+    conf.setString(FlinkOptions.TABLE_TYPE, HoodieTableType.MERGE_ON_READ.name());
+    conf.setBoolean(FlinkOptions.COMPACTION_ASYNC_ENABLED, true);
+    conf.setInteger(FlinkOptions.COMPACTION_DELTA_COMMITS, 1);
+    conf.setBoolean(FlinkOptions.CHANGELOG_ENABLED, true);
+    insertRow(StringData.fromString("id9"), StringData.fromString("Jane"), 22, TimestampData.fromEpochMillis(6), StringData.fromString("par3"));
+    set_row_type(ROW_DATA_TYPE_AGE_LONG);
+
+
+    // write 4 batches of data set
+    TestData.writeData(TestData.dataSetInsertAgeLong(1, 2), conf);
+    TestData.writeData(TestData.DATA_SET_INSERT_UPDATE_DELETE, conf);
+    TestData.writeData(TestData.dataSetInsertAgeLong(3, 4), conf);
+    TestData.writeData(TestData.dataSetInsertAgeLong(5, 6), conf);
+    try (HoodieFlinkWriteClient<?> writeClient = StreamerUtil.createWriteClient(conf)) {
+      Schema doubleType = SchemaBuilder.unionOf().nullType().and().doubleType().endUnion();
+      writeClient.addColumn("salary", doubleType, null, "age", AFTER);
+      writeClient.renameColumn("uuid", "new_uuid");
+      writeClient.updateColumnType("age", Types.IntType.get());
+      writeClient.deleteColumns("name");
+    }
+
+    String startCommit = TestUtils.getNthCompleteInstant(tempFile.getAbsolutePath(), 1, true);
+    String endCommit = TestUtils.getNthCompleteInstant(tempFile.getAbsolutePath(), 2, true);
+    set_row_type(ROW_DATA_TYPE_EVOLUTION);
+    String hoodieTableDDL = sql("t1")
+        .pkField("new_uuid")
+        .option(FlinkOptions.PATH, tempFile.getAbsolutePath())
+        .option(FlinkOptions.TABLE_TYPE, HoodieTableType.MERGE_ON_READ.name())
+        .option(FlinkOptions.CHANGELOG_ENABLED, true)
+        .option(FlinkOptions.SCHEMA_EVOLUTION_ENABLED, true)
+        .end();
+    tableEnv.executeSql(hoodieTableDDL);
+
+    List<Row> result = CollectionUtil.iterableToList(
+        () -> tableEnv.sqlQuery("select * from t1").execute().collect());
+    assertRowsEquals(result, TestData.dataSetAfterSchemaEvolution(2, 3, 4, 5, 6), ROW_DATA_TYPE_EVOLUTION);
+
+    final String query = String.format("select * from t1/*+ options('read.start-commit'='%s', 'read.end-commit'='%s', "
+        + "'read.data.delete.enabled'='true', 'read.batch.incremental.changelog.enabled'='true')*/", startCommit, endCommit);
+    List<Row> result1 = CollectionUtil.iterableToList(
+        () -> tableEnv.sqlQuery(query).execute().collect());
+    List<RowData> expected = TestData.dataSetAfterSchemaEvolution(3, 4);
+    RowData deleteRowData = TestData.deleteRow(StringData.fromString("id1"), 22, null, TimestampData.fromEpochMillis(5), StringData.fromString("par1"));
+    expected.add(deleteRowData);
+    assertRowsEquals(result1, expected, ROW_DATA_TYPE_EVOLUTION);
   }
 
   @Test

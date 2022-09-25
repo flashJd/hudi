@@ -58,6 +58,10 @@ public class HoodieCommonTestHarness {
     }
   }
 
+  protected void initPathLocal() {
+    this.basePath = "/project/hudi_module/hudi/hudi-flink-datasource/hudi-flink/hudi_table";
+  }
+
   /**
    * Initializes a test data generator which used to generate test datas.
    *

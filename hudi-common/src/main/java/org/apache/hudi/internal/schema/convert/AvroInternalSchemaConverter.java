@@ -391,7 +391,7 @@ public class AvroInternalSchemaConverter {
                 .addToSchema(Schema.create(Schema.Type.LONG));
         break;
       case TIMESTAMP:
-        primitiveSchema = LogicalTypes.timestampMicros()
+        primitiveSchema = LogicalTypes.timestampMillis()
                 .addToSchema(Schema.create(Schema.Type.LONG));
         break;
       case STRING:

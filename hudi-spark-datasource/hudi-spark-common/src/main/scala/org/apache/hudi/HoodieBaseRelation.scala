@@ -138,7 +138,10 @@ abstract class HoodieBaseRelation(val sqlContext: SQLContext,
     val internalSchemaOpt = if (!isSchemaEvolutionEnabled) {
       None
     } else {
-      Try(schemaResolver.getTableInternalSchemaFromCommitMetadata) match {
+      Try {
+        specifiedQueryTimestamp.map(schemaResolver.getTableInternalSchemaFromCommitMetadata)
+          .getOrElse(schemaResolver.getTableInternalSchemaFromCommitMetadata)
+      } match {
         case Success(internalSchemaOpt) => toScalaOption(internalSchemaOpt)
         case Failure(e) =>
           logWarning("Failed to fetch internal-schema from the table", e)
@@ -148,6 +151,8 @@ abstract class HoodieBaseRelation(val sqlContext: SQLContext,
 
     val avroSchema = internalSchemaOpt.map { is =>
       AvroInternalSchemaConverter.convert(is, "schema")
+    } orElse {
+      specifiedQueryTimestamp.map(schemaResolver.getTableAvroSchema)
     } orElse {
       schemaSpec.map(convertToAvroSchema)
     } getOrElse {
