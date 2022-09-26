@@ -25,7 +25,7 @@ import org.apache.hudi.common.util.Option;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.configuration.FlinkOptions;
 import org.apache.hudi.internal.schema.Types;
-import org.apache.hudi.keygen.ComplexAvroKeyGenerator;
+import org.apache.hudi.keygen.SimpleAvroKeyGenerator;
 import org.apache.hudi.keygen.constant.KeyGeneratorOptions;
 import org.apache.hudi.table.HoodieTableFactory;
 import org.apache.hudi.util.AvroSchemaConverter;
@@ -66,29 +66,29 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
   StreamTableEnvironment tEnv;
 
   String[] expectedMergedResult = new String[] {
-      "+I[Danny, 10000.1, 23]",
-      "+I[Stephen, null, -1794867294]",
-      "+I[Julian, 30000.3, 53]",
-      "+I[Fabian, null, 31]",
-      "+I[Sophia, null, 18]",
-      "+I[Emma, null, 20]",
-      "+I[Bob, null, 44]",
-      "+I[Han, null, 56]",
-      "+I[Alice, 90000.9, 77]"
+      "+I[id1, 23, 10000.1, 2000-01-01T00:00:01, par1]",
+      "+I[id2, -1794867294, null, 2000-01-01T00:00:02, par1]",
+      "+I[id3, 53, 30000.3, 2000-01-01T00:00:03, par2]",
+      "+I[id4, 31, null, 2000-01-01T00:00:04, par2]",
+      "+I[id5, 18, null, 2000-01-01T00:00:05, par3]",
+      "+I[id6, 20, null, 2000-01-01T00:00:06, par3]",
+      "+I[id7, 44, null, 2000-01-01T00:00:07, par4]",
+      "+I[id8, 56, null, 2000-01-01T00:00:08, par4]",
+      "+I[id9, 77, 90000.9, 2000-01-01T00:00:09, par1]"
   };
 
   String[] expectedUnMergedResult = new String[] {
-      "+I[Danny, null, 23]",
-      "+I[Stephen, null, -1794867294]",
-      "+I[Julian, null, 53]",
-      "+I[Fabian, null, 31]",
-      "+I[Sophia, null, 18]",
-      "+I[Emma, null, 20]",
-      "+I[Bob, null, 44]",
-      "+I[Han, null, 56]",
-      "+I[Alice, 90000.9, 77]",
-      "+I[Danny, 10000.1, 23]",
-      "+I[Julian, 30000.3, 53]"
+      "+I[id1, 23, 10000.1, 2000-01-01T00:00:01, par1]",
+      "+I[id2, -1794867294, null, 2000-01-01T00:00:02, par1]",
+      "+I[id3, 53, 30000.3, 2000-01-01T00:00:03, par2]",
+      "+I[id4, 31, null, 2000-01-01T00:00:04, par2]",
+      "+I[id5, 18, null, 2000-01-01T00:00:05, par3]",
+      "+I[id6, 20, null, 2000-01-01T00:00:06, par3]",
+      "+I[id7, 44, null, 2000-01-01T00:00:07, par4]",
+      "+I[id8, 56, null, 2000-01-01T00:00:08, par4]",
+      "+I[id9, 77, 90000.9, 2000-01-01T00:00:09, par1]",
+      "+I[id1, 23, null, 2000-01-01T00:00:01, par1]",
+      "+I[id3, 53, null, 2000-01-01T00:00:03, par2]"
   };
 
   void beforeEach() throws IOException {
@@ -172,7 +172,7 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
       writeClient.compact(compactionInstant.get());
     }
     //language=SQL
-    TableResult tableResult = tEnv.executeSql("select first_name, salary, age from t1");
+    TableResult tableResult = tEnv.executeSql("select * from t1");
     checkAnswer(tableResult, expectedMergedResult);
   }
 
@@ -203,7 +203,7 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
         + "  uuid string,"
         + "  name string,"
         + "  age bigint,"
-        + "  ts timestamp,"
+        + "  ts timestamp(3),"
         + "  `partition` string"
         + ") partitioned by (`partition`) with (" + optionMap + ")"
     );
@@ -213,7 +213,7 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
         + "  cast(uuid as string),"
         + "  cast(name as string),"
         + "  cast(age as bigint),"
-        + "  cast(ts as timestamp),"
+        + "  cast(ts as timestamp(3)),"
         + "  cast(`partition` as string) "
         + "from (values "
         + "  ('id1', 'Danny', 23, '2000-01-01 00:00:01', 'par1'),"
@@ -234,41 +234,42 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
       }
       Schema doubleType = SchemaBuilder.unionOf().nullType().and().doubleType().endUnion();
       writeClient.addColumn("salary", doubleType, null, "age", AFTER);
-      writeClient.renameColumn("name", "first_name");
+//      writeClient.renameColumn("name", "first_name");
+      writeClient.renameColumn("uuid", "new_uuid");
       writeClient.updateColumnType("age", Types.IntType.get());
+      writeClient.deleteColumns("name");
     }
 
     tEnv.executeSql("drop table t1");
     optionMap.put(FlinkOptions.SOURCE_AVRO_SCHEMA.key(), AvroSchemaConverter.convertToSchema(ROW_TYPE_EVOLUTION));
+    optionMap.put(KeyGeneratorOptions.RECORDKEY_FIELD_NAME.key(), "new_uuid");
 
     //language=SQL
     tEnv.executeSql(""
         + "create table t1 ("
-        + "  uuid string,"
-        + "  first_name string,"
+        + "  new_uuid string,"
         + "  age int,"
         + "  salary double,"
-        + "  ts timestamp,"
+        + "  ts timestamp(3),"
         + "  `partition` string"
         + ") partitioned by (`partition`) with (" + optionMap + ")"
     );
     //language=SQL
     tEnv.executeSql(""
         + "insert into t1 select "
-        + "  cast(uuid as string),"
-        + "  cast(first_name as string),"
+        + "  cast(new_uuid as string),"
         + "  cast(age as int),"
         + "  cast(salary as double),"
-        + "  cast(ts as timestamp),"
+        + "  cast(ts as timestamp(3)),"
         + "  cast(`partition` as string) "
         + "from (values "
-        + "  ('id1', 'Danny', 23, 10000.1, '2000-01-01 00:00:01', 'par1'),"
-        + "  ('id9', 'Alice', 77, 90000.9, '2000-01-01 00:00:09', 'par1'),"
-        + "  ('id3', 'Julian', 53, 30000.3, '2000-01-01 00:00:03', 'par2')"
-        + ") as A(uuid, first_name, age, salary, ts, `partition`)"
+        + "  ('id1', 23, 10000.1, '2000-01-01 00:00:01', 'par1'),"
+        + "  ('id9', 77, 90000.9, '2000-01-01 00:00:09', 'par1'),"
+        + "  ('id3', 53, 30000.3, '2000-01-01 00:00:03', 'par2')"
+        + ") as A(new_uuid, age, salary, ts, `partition`)"
     ).await();
 
-    TableResult tableResult = tEnv.executeSql("select first_name, salary, age from t1");
+    TableResult tableResult = tEnv.executeSql("select * from t1");
     checkAnswer(tableResult, expectedResult);
   }
 
@@ -283,7 +284,7 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
         KeyGeneratorOptions.RECORDKEY_FIELD_NAME.key(), "uuid",
         KeyGeneratorOptions.PARTITIONPATH_FIELD_NAME.key(), "partition",
         KeyGeneratorOptions.HIVE_STYLE_PARTITIONING_ENABLE.key(), true,
-        HoodieWriteConfig.KEYGENERATOR_CLASS_NAME.key(), ComplexAvroKeyGenerator.class.getName(),
+        HoodieWriteConfig.KEYGENERATOR_CLASS_NAME.key(), SimpleAvroKeyGenerator.class.getName(),
         FlinkOptions.WRITE_BATCH_SIZE.key(), 0.000001, // trigger flush after each record
         FlinkOptions.SOURCE_AVRO_SCHEMA.key(), AvroSchemaConverter.convertToSchema(ROW_TYPE_AGE_LONG),
         FlinkOptions.READ_TASKS.key(), 1,

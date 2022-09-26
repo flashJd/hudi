@@ -85,7 +85,7 @@ class CustomTestTimeTravelQuery extends HoodieClientTestBase {
     metaClient = HoodieTableMetaClient.withPropertyBuilder
       .setTableType(HoodieTableType.MERGE_ON_READ)
       .setTableName("aa")
-      .setRecordKeyFields("uuid")
+      .setRecordKeyFields("new_uuid")
       .setPayloadClass(classOf[HoodieAvroPayload])
       .setPreCombineField("ts")
       .setPartitionFields("partition")
@@ -120,7 +120,7 @@ class CustomTestTimeTravelQuery extends HoodieClientTestBase {
     metaClient = HoodieTableMetaClient.withPropertyBuilder
       .setTableType(HoodieTableType.MERGE_ON_READ)
       .setTableName("aa")
-      .setRecordKeyFields("uuid")
+      .setRecordKeyFields("new_uuid")
       .setPayloadClass(classOf[HoodieAvroPayload])
       .setPreCombineField("ts")
       .setPartitionFields("partition")
@@ -133,7 +133,7 @@ class CustomTestTimeTravelQuery extends HoodieClientTestBase {
     //       and are disallowed now by default in Spark 3.x
     spark.sql("set spark.sql.storeAssignmentPolicy=legacy")
 
-    // implicit evolution has two instants, explicit evolution has five instants, first insert, second addColumn, third renameColumn, forth updateColumnType, last insert
+    // implicit evolution has two instants, explicit evolution has six instants, first insert, second addColumn, third renameColumn, forth updateColumnType, fifth deleteColumn, last upsert
     metaClient.getActiveTimeline.filterCompletedInstants().getInstants()
       .filter(toJavaPredicate((instance:HoodieInstant) => instance.getAction != HoodieTimeline.ROLLBACK_ACTION))
       .forEach(toJavaConsumer((instance:HoodieInstant) => println("####", instance.getTimestamp)))

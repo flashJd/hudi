@@ -126,8 +126,8 @@ public class TestConfigurations {
   public static final RowType ROW_TYPE_DATE = (RowType) ROW_DATA_TYPE_DATE.getLogicalType();
 
   public static final DataType ROW_DATA_TYPE_EVOLUTION = DataTypes.ROW(
-      DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),
-      DataTypes.FIELD("first_name", DataTypes.VARCHAR(10)), // renamed
+      DataTypes.FIELD("new_uuid", DataTypes.VARCHAR(20)),// renamed
+//      DataTypes.FIELD("name", DataTypes.VARCHAR(10)), // deleted
       DataTypes.FIELD("age", DataTypes.INT()), // changed type
       DataTypes.FIELD("salary", DataTypes.DOUBLE()), // new field
       DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)),
