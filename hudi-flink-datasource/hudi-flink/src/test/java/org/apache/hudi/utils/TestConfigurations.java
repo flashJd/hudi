@@ -81,7 +81,6 @@ public class TestConfigurations {
 
   public static RowType ROW_TYPE = (RowType) ROW_DATA_TYPE.getLogicalType();
 
-
   public static void set_row_type(DataType dataType) {
     ROW_TYPE = (RowType) dataType.getLogicalType();
     SERIALIZER = new RowDataSerializer(ROW_TYPE);
@@ -127,7 +126,7 @@ public class TestConfigurations {
 
   public static final DataType ROW_DATA_TYPE_EVOLUTION = DataTypes.ROW(
       DataTypes.FIELD("new_uuid", DataTypes.VARCHAR(20)),// renamed
-//      DataTypes.FIELD("name", DataTypes.VARCHAR(10)), // deleted
+      // DataTypes.FIELD("name", DataTypes.VARCHAR(10)), // deleted
       DataTypes.FIELD("age", DataTypes.INT()), // changed type
       DataTypes.FIELD("salary", DataTypes.DOUBLE()), // new field
       DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)),

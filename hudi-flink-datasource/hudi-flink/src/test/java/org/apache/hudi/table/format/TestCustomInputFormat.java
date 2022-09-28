@@ -20,8 +20,6 @@ package org.apache.hudi.table.format;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.flink.api.common.io.InputFormat;
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.io.InputSplit;
 import org.apache.flink.runtime.operators.coordination.OperatorEvent;
@@ -29,14 +27,8 @@ import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.writer.BinaryRowWriter;
-import org.apache.flink.table.data.writer.BinaryWriter;
-import org.apache.flink.table.runtime.typeutils.InternalSerializers;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.hadoop.fs.Path;
-import org.apache.hudi.common.HoodieJsonPayload;
 import org.apache.hudi.common.model.HoodieTableType;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.timeline.HoodieInstant;
@@ -44,7 +36,6 @@ import org.apache.hudi.configuration.FlinkOptions;
 import org.apache.hudi.configuration.HadoopConfigurations;
 import org.apache.hudi.sink.utils.StreamWriteFunctionWrapper;
 import org.apache.hudi.table.HoodieTableSource;
-import org.apache.hudi.table.format.cow.CopyOnWriteInputFormat;
 import org.apache.hudi.table.format.mor.MergeOnReadInputFormat;
 import org.apache.hudi.util.AvroSchemaConverter;
 import org.apache.hudi.util.StreamerUtil;
@@ -52,20 +43,28 @@ import org.apache.hudi.utils.SchemaBuilder;
 import org.apache.hudi.utils.TestConfigurations;
 import org.apache.hudi.utils.TestData;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
-import static junit.framework.TestCase.assertEquals;
 import static org.apache.hudi.common.model.HoodieTableType.COPY_ON_WRITE;
-import static org.apache.hudi.common.model.HoodieTableType.MERGE_ON_READ;
-import static org.apache.hudi.utils.TestConfigurations.*;
+import static org.apache.hudi.utils.TestConfigurations.ROW_DATA_TYPE;
+import static org.apache.hudi.utils.TestConfigurations.ROW_DATA_TYPE_ADD_SCORE;
+import static org.apache.hudi.utils.TestConfigurations.ROW_DATA_TYPE_AGE_LONG;
+import static org.apache.hudi.utils.TestConfigurations.ROW_DATA_TYPE_CHANGE_AGE_INT2DOUBLE;
+import static org.apache.hudi.utils.TestConfigurations.ROW_DATA_TYPE_DEL_AGE;
+import static org.apache.hudi.utils.TestConfigurations.ROW_TYPE;
+import static org.apache.hudi.utils.TestConfigurations.set_row_type;
 import static org.apache.hudi.utils.TestData.insertRow;
 import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.CoreMatchers.is;
@@ -115,7 +114,7 @@ public class TestCustomInputFormat {
     // write another commit to read again
     conf.setString(FlinkOptions.SOURCE_AVRO_SCHEMA, AvroSchemaConverter.convertToSchema(ROW_DATA_TYPE_ADD_SCORE.getLogicalType()).toString());
     set_row_type(ROW_DATA_TYPE_ADD_SCORE);
-    List<RowData> DATA_SET_INSERT1 = Arrays.asList(
+    List<RowData> dataSetInsert = Arrays.asList(
             // new data
             insertRow(StringData.fromString("id9"), StringData.fromString("Jane"), 22,
                     TimestampData.fromEpochMillis(6), StringData.fromString("par3"), 22),
@@ -124,16 +123,16 @@ public class TestCustomInputFormat {
             insertRow(StringData.fromString("id1"), StringData.fromString("Phoebe"), 44,
                     TimestampData.fromEpochMillis(8), StringData.fromString("par1"), 44)
     );
-    TestData.writeData(DATA_SET_INSERT1, conf);
+    TestData.writeData(dataSetInsert, conf);
 
     // refresh the input format
     this.tableSource.reset();
 
-    ResolvedSchema TABLE_SCHEMA1 = SchemaBuilder.instance()
+    ResolvedSchema newSchema = SchemaBuilder.instance()
             .fields(((RowType) ROW_DATA_TYPE_ADD_SCORE.getLogicalType()).getFieldNames(), ROW_DATA_TYPE_ADD_SCORE.getChildren())
             .build();
     this.tableSource = new HoodieTableSource(
-            TABLE_SCHEMA1,
+            newSchema,
             new Path(tempFile.getAbsolutePath()),
             Collections.singletonList("partition"),
             "default",
@@ -173,7 +172,7 @@ public class TestCustomInputFormat {
     // write another commit to read again
     conf.setString(FlinkOptions.SOURCE_AVRO_SCHEMA, AvroSchemaConverter.convertToSchema(ROW_DATA_TYPE_DEL_AGE.getLogicalType()).toString());
     set_row_type(ROW_DATA_TYPE_DEL_AGE);
-    List<RowData> DATA_SET_INSERT1 = Arrays.asList(
+    List<RowData> dataSetInsert = Arrays.asList(
         // new data
         insertRow(StringData.fromString("id9"), StringData.fromString("Jane"),
                   TimestampData.fromEpochMillis(6), StringData.fromString("par3")),
@@ -182,17 +181,17 @@ public class TestCustomInputFormat {
         insertRow(StringData.fromString("id1"), StringData.fromString("Phoebe"),
                   TimestampData.fromEpochMillis(8), StringData.fromString("par1"))
     );
-    TestData.writeData(DATA_SET_INSERT1, conf);
+    TestData.writeData(dataSetInsert, conf);
 
     // refresh the input format
     this.tableSource.reset();
 
     set_row_type(ROW_DATA_TYPE);
-    ResolvedSchema TABLE_SCHEMA1 = SchemaBuilder.instance()
+    ResolvedSchema newSchema = SchemaBuilder.instance()
         .fields(((RowType) ROW_DATA_TYPE.getLogicalType()).getFieldNames(), ROW_DATA_TYPE.getChildren())
         .build();
     this.tableSource = new HoodieTableSource(
-        TABLE_SCHEMA1,
+            newSchema,
         new Path(tempFile.getAbsolutePath()),
         Collections.singletonList("partition"),
         "default",
@@ -254,7 +253,7 @@ public class TestCustomInputFormat {
     // write another commit to read again
     conf.setString(FlinkOptions.SOURCE_AVRO_SCHEMA_PATH, Objects.requireNonNull(Thread.currentThread().getContextClassLoader().getResource("test_read_schema2.avsc")).toString());
     set_row_type(ROW_DATA_TYPE_CHANGE_AGE_INT2DOUBLE);
-    List<RowData> DATA_SET_INSERT2 = Arrays.asList(
+    List<RowData> dataSetInsert = Arrays.asList(
         // new data
         insertRow(StringData.fromString("id9"), StringData.fromString("Jane"), 22.2,
                   TimestampData.fromEpochMillis(6), StringData.fromString("par3")),
@@ -263,15 +262,15 @@ public class TestCustomInputFormat {
         insertRow(StringData.fromString("id1"), StringData.fromString("Phoebe"), 44.4,
                   TimestampData.fromEpochMillis(8), StringData.fromString("par1"))
     );
-    TestData.writeData(DATA_SET_INSERT2, conf);
+    TestData.writeData(dataSetInsert, conf);
 
     this.tableSource.reset();
 
-    ResolvedSchema TABLE_SCHEMA2 = SchemaBuilder.instance()
+    ResolvedSchema newSchema = SchemaBuilder.instance()
         .fields(ROW_TYPE.getFieldNames(), ROW_DATA_TYPE_CHANGE_AGE_INT2DOUBLE.getChildren())
         .build();
     this.tableSource = new HoodieTableSource(
-        TABLE_SCHEMA2,
+            newSchema,
         new Path(tempFile.getAbsolutePath()),
         Collections.singletonList("partition"),
         "default",
@@ -309,7 +308,7 @@ public class TestCustomInputFormat {
     insertRow(StringData.fromString("id9"), StringData.fromString("Jane"), 22,
             TimestampData.fromEpochMillis(6), StringData.fromString("par3"));
     set_row_type(ROW_DATA_TYPE_AGE_LONG);
-    List<RowData> DATA_SET_INSERT = Arrays.asList(
+    List<RowData> dataSetInsert = Arrays.asList(
         // new data
         insertRow(StringData.fromString("id9"), StringData.fromString("Jane"), 22L,
                   TimestampData.fromEpochMillis(6), StringData.fromString("par3")),
@@ -318,7 +317,7 @@ public class TestCustomInputFormat {
         insertRow(StringData.fromString("id11"), StringData.fromString("Phoebe"), 44L,
                   TimestampData.fromEpochMillis(8), StringData.fromString("par4"))
     );
-    writeData(DATA_SET_INSERT, conf);
+    writeData(dataSetInsert, conf);
 
     InputFormat<RowData, ?> inputFormat;
     List<RowData> result;
@@ -328,7 +327,7 @@ public class TestCustomInputFormat {
     // write another commit to read again
     conf.setString(FlinkOptions.SOURCE_AVRO_SCHEMA_PATH, Objects.requireNonNull(Thread.currentThread().getContextClassLoader().getResource("test_read_schema.avsc")).toString());
     set_row_type(ROW_DATA_TYPE);
-    List<RowData> DATA_SET_INSERT2 = Arrays.asList(
+    List<RowData> dataSetInsert1 = Arrays.asList(
         // new data
         insertRow(StringData.fromString("id99"), StringData.fromString("Jane"), 99,
                   TimestampData.fromEpochMillis(6), StringData.fromString("par3")),
@@ -337,15 +336,15 @@ public class TestCustomInputFormat {
         insertRow(StringData.fromString("id111"), StringData.fromString("Phoebe"), 111,
                   TimestampData.fromEpochMillis(8), StringData.fromString("par4"))
     );
-    writeData(DATA_SET_INSERT2, conf);
+    writeData(dataSetInsert1, conf);
 
     this.tableSource.reset();
 
-    ResolvedSchema TABLE_SCHEMA2 = SchemaBuilder.instance()
+    ResolvedSchema newSchema = SchemaBuilder.instance()
         .fields(ROW_TYPE.getFieldNames(), ROW_DATA_TYPE.getChildren())
         .build();
     this.tableSource = new HoodieTableSource(
-        TABLE_SCHEMA2,
+            newSchema,
         new Path(tempFile.getAbsolutePath()),
         Collections.singletonList("partition"),
         "default",
@@ -416,126 +415,9 @@ public class TestCustomInputFormat {
     assertThat(actual, is(expected));
   }
 
-  @Test
-  void testReadBaseAndLogFilesWithDeletes() throws Exception {
-    Map<String, String> options = new HashMap<>();
-    options.put(FlinkOptions.CHANGELOG_ENABLED.key(), "true");
-    beforeEach(HoodieTableType.MERGE_ON_READ, options);
-
-    // write base first with compaction.
-    conf.setBoolean(FlinkOptions.COMPACTION_ASYNC_ENABLED, true);
-    conf.setInteger(FlinkOptions.COMPACTION_DELTA_COMMITS, 1);
-    TestData.writeData(TestData.DATA_SET_INSERT, conf);
-
-    // write another commit using logs and read again.
-    conf.setBoolean(FlinkOptions.COMPACTION_ASYNC_ENABLED, false);
-    TestData.writeData(TestData.DATA_SET_UPDATE_DELETE, conf);
-
-    InputFormat<RowData, ?> inputFormat = this.tableSource.getInputFormat();
-    assertThat(inputFormat, instanceOf(MergeOnReadInputFormat.class));
-
-    // when isEmitDelete is false.
-    List<RowData> result1 = readData(inputFormat);
-
-    final String actual1 = TestData.rowDataToString(result1);
-    final String expected1 = "["
-        + "+I[id1, Danny, 24, 1970-01-01T00:00:00.001, par1], "
-        + "+I[id2, Stephen, 34, 1970-01-01T00:00:00.002, par1], "
-        + "+I[id4, Fabian, 31, 1970-01-01T00:00:00.004, par2], "
-        + "+I[id6, Emma, 20, 1970-01-01T00:00:00.006, par3], "
-        + "+I[id7, Bob, 44, 1970-01-01T00:00:00.007, par4], "
-        + "+I[id8, Han, 56, 1970-01-01T00:00:00.008, par4]]";
-    assertThat(actual1, is(expected1));
-
-    // refresh the input format and set isEmitDelete to true.
-    this.tableSource.reset();
-    inputFormat = this.tableSource.getInputFormat();
-    ((MergeOnReadInputFormat) inputFormat).isEmitDelete(true);
-
-    List<RowData> result2 = readData(inputFormat);
-
-    final String actual2 = TestData.rowDataToString(result2);
-    final String expected2 = "["
-        + "+I[id1, Danny, 24, 1970-01-01T00:00:00.001, par1], "
-        + "+I[id2, Stephen, 34, 1970-01-01T00:00:00.002, par1], "
-        + "-D[id3, Julian, 53, 1970-01-01T00:00:00.003, par2], "
-        + "+I[id4, Fabian, 31, 1970-01-01T00:00:00.004, par2], "
-        + "-D[id5, Sophia, 18, 1970-01-01T00:00:00.005, par3], "
-        + "+I[id6, Emma, 20, 1970-01-01T00:00:00.006, par3], "
-        + "+I[id7, Bob, 44, 1970-01-01T00:00:00.007, par4], "
-        + "+I[id8, Han, 56, 1970-01-01T00:00:00.008, par4], "
-        + "-D[id9, Jane, 19, 1970-01-01T00:00:00.006, par3]]";
-    assertThat(actual2, is(expected2));
-  }
-
-  @Test
-  void testReadChangesMergedMOR() throws Exception {
-    Map<String, String> options = new HashMap<>();
-    options.put(FlinkOptions.CHANGELOG_ENABLED.key(), "false");
-//    options.put(FlinkOptions.QUERY_TYPE.key(), FlinkOptions.QUERY_TYPE_INCREMENTAL);
-    beforeEach(HoodieTableType.MERGE_ON_READ, options);
-
-    // write another commit to read again
-    TestData.writeData(TestData.DATA_SET_INSERT_UPDATE_DELETE, conf);
-
-    InputFormat<RowData, ?> inputFormat = this.tableSource.getInputFormat();
-//    assertThat(inputFormat, instanceOf(MergeOnReadInputFormat.class));
-//
-//    List<RowData> result1 = readData(inputFormat);
-//
-//    final String actual1 = TestData.rowDataToString(result1);
-//    // the data set is merged when the data source is bounded.
-//    final String expected1 = "[]";
-//    assertThat(actual1, is(expected1));
-//
-//    // refresh the input format and set isEmitDelete to true.
-//    this.tableSource.reset();
-    inputFormat = this.tableSource.getInputFormat();
-    ((MergeOnReadInputFormat) inputFormat).isEmitDelete(true);
-
-    List<RowData> result2 = readData(inputFormat);
-
-    final String actual2 = TestData.rowDataToString(result2);
-    final String expected2 = "[-D[id1, Danny, 22, 1970-01-01T00:00:00.005, par1]]";
-    assertThat(actual2, is(expected2));
-  }
-
-  @Test
-  void testReadChangesUnMergedMOR() throws Exception {
-    Map<String, String> options = new HashMap<>();
-    options.put(FlinkOptions.CHANGELOG_ENABLED.key(), "true");
-    options.put(FlinkOptions.READ_AS_STREAMING.key(), "true");
-//    options.put(FlinkOptions.QUERY_TYPE.key(), FlinkOptions.QUERY_TYPE_INCREMENTAL);
-    beforeEach(HoodieTableType.MERGE_ON_READ, options);
-
-    // write another commit to read again
-    TestData.writeData(TestData.DATA_SET_INSERT_UPDATE_DELETE, conf);
-
-    InputFormat<RowData, ?> inputFormat = this.tableSource.getInputFormat();
-    assertThat(inputFormat, instanceOf(MergeOnReadInputFormat.class));
-
-    List<RowData> result = readData(inputFormat);
-
-    final String actual = TestData.rowDataToString(result);
-    // the data set is merged when the data source is bounded.
-    final String expected = "["
-        + "+I[id1, Danny, 19, 1970-01-01T00:00:00.001, par1], "
-        + "-U[id1, Danny, 19, 1970-01-01T00:00:00.001, par1], "
-        + "+U[id1, Danny, 20, 1970-01-01T00:00:00.002, par1], "
-        + "-U[id1, Danny, 20, 1970-01-01T00:00:00.002, par1], "
-        + "+U[id1, Danny, 21, 1970-01-01T00:00:00.003, par1], "
-        + "-U[id1, Danny, 21, 1970-01-01T00:00:00.003, par1], "
-        + "+U[id1, Danny, 22, 1970-01-01T00:00:00.004, par1], "
-        + "-D[id1, Danny, 22, 1970-01-01T00:00:00.005, par1]]";
-    assertThat(actual, is(expected));
-  }
-
   @ParameterizedTest
   @EnumSource(value = HoodieTableType.class)
   void testReadIncrementally(HoodieTableType tableType) throws Exception {
-    if (tableType == COPY_ON_WRITE) {
-      return;
-    }
     Map<String, String> options = new HashMap<>();
     options.put(FlinkOptions.QUERY_TYPE.key(), FlinkOptions.QUERY_TYPE_INCREMENTAL);
     beforeEach(tableType, options);

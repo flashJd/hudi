@@ -44,7 +44,7 @@ import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.Preconditions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+//import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
@@ -57,7 +57,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.hudi.internal.schema.action.TableChange.ColumnPositionChange.ColumnPositionType.AFTER;
-import static org.apache.hudi.utils.TestConfigurations.*;
+import static org.apache.hudi.utils.TestConfigurations.ROW_TYPE_AGE_LONG;
+import static org.apache.hudi.utils.TestConfigurations.ROW_TYPE_EVOLUTION;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class ITTestSchemaEvolution extends AbstractTestBase {
@@ -234,7 +235,6 @@ public class ITTestSchemaEvolution extends AbstractTestBase {
       }
       Schema doubleType = SchemaBuilder.unionOf().nullType().and().doubleType().endUnion();
       writeClient.addColumn("salary", doubleType, null, "age", AFTER);
-//      writeClient.renameColumn("name", "first_name");
       writeClient.renameColumn("uuid", "new_uuid");
       writeClient.updateColumnType("age", Types.IntType.get());
       writeClient.deleteColumns("name");

@@ -59,7 +59,7 @@ public class HoodieCommonTestHarness {
   }
 
   protected void initPathLocal() {
-      this.basePath = "/project/hudi_module/hudi/hudi-flink-datasource/hudi-flink/hudi_table";
+    this.basePath = "/project/hudi_module/hudi/hudi-flink-datasource/hudi-flink/hudi_table";
   }
 
   /**

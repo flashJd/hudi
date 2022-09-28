@@ -26,7 +26,6 @@ import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.DoubleType;
 import org.apache.flink.table.types.logical.FloatType;
 import org.apache.flink.table.types.logical.IntType;
-
 import org.apache.flink.table.types.logical.VarCharType;
 import org.junit.jupiter.api.Test;
 
