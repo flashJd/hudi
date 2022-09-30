@@ -24,9 +24,9 @@ import org.apache.hudi.common.table.timeline.HoodieTimeline;
 import org.apache.hudi.common.table.view.HoodieTableFileSystemView;
 import org.apache.hudi.common.table.view.SyncableFileSystemView;
 import org.apache.hudi.exception.HoodieIOException;
-
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.io.IOException;
 
 /**
@@ -59,7 +59,7 @@ public class HoodieCommonTestHarness {
   }
 
   protected void initPathLocal() {
-    this.basePath = "/project/hudi_module/hudi/hudi-flink-datasource/hudi-flink/hudi_table";
+    this.basePath = new File("").getAbsolutePath() + "/../../hudi-flink-datasource/hudi-flink/hudi_table";
   }
 
   /**
