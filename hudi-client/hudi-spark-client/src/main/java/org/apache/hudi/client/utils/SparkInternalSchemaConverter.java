@@ -440,7 +440,7 @@ public class SparkInternalSchemaConverter {
    * TODO: support more types
    */
   private static boolean convertStringType(WritableColumnVector oldV, WritableColumnVector newV, DataType newType, int len) {
-    if (newType instanceof DateType || newType instanceof DecimalType) {
+    if (newType instanceof DateType || newType instanceof DecimalType || newType instanceof IntegerType) {
       for (int i = 0; i < len; i++) {
         if (oldV.isNullAt(i)) {
           newV.putNull(i);
@@ -456,6 +456,12 @@ public class SparkInternalSchemaConverter {
           Decimal sparkDecimal = Decimal.apply(bigDecimal);
           sparkDecimal.changePrecision(decimalType.precision(), decimalType.scale());
           newV.putDecimal(i, sparkDecimal, decimalType.precision());
+        } else if (newType instanceof IntegerType) {
+          try {
+            newV.putInt(i, Integer.valueOf(oldV.getUTF8String(i).toString()));
+          } catch (NumberFormatException ex) {
+            newV.putNull(i);
+          }
         }
       }
       return true;

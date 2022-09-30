@@ -82,7 +82,7 @@ public class SchemaChangeUtils {
         }
         break;
       case STRING:
-        return dsr == Types.DateType.get() || dsr.typeId() == Type.TypeID.DECIMAL;
+        return dsr == Types.DateType.get() || dsr.typeId() == Type.TypeID.DECIMAL || dsr == Types.IntType.get();
       default:
         return false;
     }

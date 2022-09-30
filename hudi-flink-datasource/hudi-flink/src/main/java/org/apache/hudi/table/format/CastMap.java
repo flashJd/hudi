@@ -121,6 +121,16 @@ public final class CastMap implements Serializable {
         if (from == BIGINT) {
           return val -> ((Number) val).intValue();
         }
+        // String => Integer
+        if (from == VARCHAR) {
+          return (val) -> {
+            try {
+              return Integer.valueOf(val.toString());
+            } catch (NumberFormatException ex) {
+              return null;
+            }
+          };
+        }
         break;
       }
       case BIGINT: {
