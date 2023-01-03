@@ -21,6 +21,8 @@ package org.apache.hudi.table;
 import org.apache.hudi.adapter.TestTableEnvs;
 import org.apache.hudi.common.model.DefaultHoodieRecordPayload;
 import org.apache.hudi.common.model.HoodieTableType;
+import org.apache.hudi.common.table.HoodieTableConfig;
+import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.timeline.HoodieTimeline;
 import org.apache.hudi.configuration.FlinkOptions;
 import org.apache.hudi.table.catalog.HoodieCatalogTestUtils;
@@ -44,8 +46,11 @@ import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CollectionUtil;
+import org.apache.hadoop.fs.Path;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -58,11 +63,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -71,6 +78,7 @@ import java.util.stream.Stream;
 import static org.apache.hudi.utils.TestConfigurations.catalog;
 import static org.apache.hudi.utils.TestConfigurations.sql;
 import static org.apache.hudi.utils.TestData.assertRowsEquals;
+import static org.apache.hudi.utils.TestData.insertRow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -141,6 +149,55 @@ public class ITTestHoodieDataSource {
     List<Row> rows3 = execSelectSql(streamTableEnv,
         "select * from t1/*+options('read.start-commit'='earliest')*/", 10);
     assertRowsEquals(rows3, TestData.DATA_SET_SOURCE_INSERT);
+  }
+
+  @ParameterizedTest
+  @EnumSource(value = HoodieTableType.class)
+  void testStreamWriteAndReadWithPreCombineFilter(HoodieTableType tableType) throws Exception {
+    // create filesystem table named source
+    String createSource = TestConfigurations.getFileSourceDDL("source");
+    streamTableEnv.executeSql(createSource);
+
+    String hoodieTableDDL = sql("t1")
+        .option(FlinkOptions.PATH, tempFile.getAbsolutePath())
+        .option(FlinkOptions.READ_AS_STREAMING, true)
+        .option(FlinkOptions.TABLE_TYPE, tableType)
+        .end();
+    streamTableEnv.executeSql(hoodieTableDDL);
+
+    String insertInto = "insert into t1 select * from source";
+    // execInsertSql(streamTableEnv, insertInto);
+    streamTableEnv.executeSql(insertInto).print();
+
+    Properties pro = new Properties();
+    pro.setProperty(HoodieTableConfig.PRECOMBINE_MIN.key(), "1970-01-01 00:00:20");
+    org.apache.hadoop.conf.Configuration conf = new org.apache.hadoop.conf.Configuration();
+    HoodieTableMetaClient metaClient = StreamerUtil.createMetaClient(tempFile.getAbsolutePath(), conf);
+    HoodieTableConfig.update(metaClient.getFs(), new Path(metaClient.getMetaPath()), pro);
+
+    String firstCommit = TestUtils.getFirstCompleteInstant(tempFile.getAbsolutePath());
+    streamTableEnv.executeSql("drop table t1");
+    hoodieTableDDL = sql("t1")
+        .option(FlinkOptions.PATH, tempFile.getAbsolutePath())
+        .option(FlinkOptions.READ_AS_STREAMING, true)
+        .option(FlinkOptions.TABLE_TYPE, tableType)
+        .option(FlinkOptions.READ_START_COMMIT, firstCommit)
+        .option(FlinkOptions.PRECOMBINE_FILTER_ENABLE, true)
+        .end();
+    streamTableEnv.executeSql(hoodieTableDDL);
+    List<Row> rows = execSelectSql(streamTableEnv, "select * from t1", 10);
+    assertRowsEquals(rows, TestData.DATA_SET_SOURCE_INSERT);
+
+    // insert another batch of data
+    final String insertInto2 = "insert into t1 values\n"
+        + "('id11','jian',33,TIMESTAMP '1970-01-01 00:00:21','par1'),\n"
+        + "('id12','yong',18,TIMESTAMP '1970-01-01 00:00:19','par1')";
+    streamTableEnv.executeSql(insertInto2).print();
+    List<Row> rows2 = execSelectSql(streamTableEnv, "select * from t1", 10);
+    List<RowData> expected =  new ArrayList<>(TestData.DATA_SET_SOURCE_INSERT);
+    expected.add(insertRow(StringData.fromString("id11"), StringData.fromString("jian"), 33,
+        TimestampData.fromEpochMillis(21000), StringData.fromString("par1")));
+    assertRowsEquals(rows2, expected);
   }
 
   @ParameterizedTest

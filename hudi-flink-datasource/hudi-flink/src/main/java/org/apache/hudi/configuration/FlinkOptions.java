@@ -107,6 +107,12 @@ public class FlinkOptions extends HoodieConfig {
           + "key value, we will pick the one with the largest value for the precombine field,\n"
           + "determined by Object.compareTo(..)");
 
+  public static final ConfigOption<Boolean> PRECOMBINE_FILTER_ENABLE = ConfigOptions
+      .key("precombine.filter.enable")
+      .booleanType()
+      .defaultValue(false)
+      .withDescription("Whether to filter record using precombine field");
+
   public static final ConfigOption<String> PAYLOAD_CLASS_NAME = ConfigOptions
       .key("payload.class")
       .stringType()

@@ -236,7 +236,7 @@ class TestSpark3DDL extends HoodieSparkSqlTestBase {
           createAndPreparePartitionTable(spark, tableName, tablePath, tableType)
 
           // test set properties
-          spark.sql(s"alter table $tableName set tblproperties(comment='it is a hudi table', 'key1'='value1', 'key2'='value2')")
+          spark.sql(s"alter table $tableName set tblproperties(comment='it is a hudi table', 'key1'='value1', 'key2'='value2', 'hoodie.table.precombine.min'='1970-01-01 00:00:20')")
           val meta = spark.sessionState.catalog.getTableMetadata(TableIdentifier(tableName))
           assert(meta.comment.get.equals("it is a hudi table"))
           assert(Seq("key1", "key2").filter(meta.properties.contains(_)).size == 2)

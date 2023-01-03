@@ -26,6 +26,7 @@ import org.apache.hudi.common.model.HoodieRecord;
 import org.apache.hudi.common.model.HoodieRecordLocation;
 import org.apache.hudi.common.model.HoodieRecordPayload;
 import org.apache.hudi.common.model.WriteOperationType;
+import org.apache.hudi.common.table.HoodieTableConfig;
 import org.apache.hudi.common.util.ObjectSizeCalculator;
 import org.apache.hudi.common.util.ValidationUtils;
 import org.apache.hudi.configuration.FlinkOptions;
@@ -44,13 +45,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.TimeZone;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
@@ -423,8 +428,29 @@ public class StreamWriteFunction<I> extends AbstractStreamWriteFunction<I> {
     if (config.getBoolean(FlinkOptions.PRE_COMBINE)) {
       records = FlinkWriteHelper.newInstance().deduplicateRecords(records, (HoodieIndex) null, -1);
     }
-    bucket.preWrite(records);
-    final List<WriteStatus> writeStatus = new ArrayList<>(writeFunction.apply(records, instant));
+
+    if (config.getBoolean(FlinkOptions.PRECOMBINE_FILTER_ENABLE)) {
+      HoodieTableConfig tableConfig = new HoodieTableConfig(this.metaClient.getFs(), this.metaClient.getMetaPath(), this.metaClient.getTableConfig().getPayloadClass());
+      String preCombineMin = tableConfig.getPreCombineMin();
+      if (preCombineMin != null) {
+        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd hh:mm:ss");
+        dateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
+        try {
+          Date parsedDate = dateFormat.parse(preCombineMin);
+          Long timeToCompare = parsedDate.getTime();
+          records = records.stream().filter(record -> ((HoodieAvroRecord) record).getData().getOrderingValue().compareTo(timeToCompare) >= 0).collect(Collectors.toList());
+        } catch (ParseException e) {
+          throw new HoodieException("parse preCombineMin failed");
+        }
+      }
+    }
+
+    final List<WriteStatus> writeStatus = new ArrayList<>();
+    if (records.size() != 0) {
+      bucket.preWrite(records);
+      writeStatus.addAll(writeFunction.apply(records, instant));
+    }
+
     records.clear();
     final WriteMetadataEvent event = WriteMetadataEvent.builder()
         .taskID(taskID)
@@ -458,8 +484,29 @@ public class StreamWriteFunction<I> extends AbstractStreamWriteFunction<I> {
               if (config.getBoolean(FlinkOptions.PRE_COMBINE)) {
                 records = FlinkWriteHelper.newInstance().deduplicateRecords(records, (HoodieIndex) null, -1);
               }
-              bucket.preWrite(records);
-              writeStatus.addAll(writeFunction.apply(records, currentInstant));
+
+              if (config.getBoolean(FlinkOptions.PRECOMBINE_FILTER_ENABLE)) {
+                HoodieTableConfig tableConfig = new HoodieTableConfig(this.metaClient.getFs(), this.metaClient.getMetaPath(), this.metaClient.getTableConfig().getPayloadClass());
+                String preCombineMin = tableConfig.getPreCombineMin();
+                if (preCombineMin != null) {
+                  SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd hh:mm:ss");
+                  dateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
+                  try {
+                    Date parsedDate = dateFormat.parse(preCombineMin);
+                    Long timeToCompare = parsedDate.getTime();
+                    records = records.stream().filter(record -> ((HoodieAvroRecord)record).getData().getOrderingValue().compareTo(timeToCompare) >= 0).collect(Collectors.toList());
+                  } catch (ParseException e) {
+                    throw new HoodieException("parse preCombineMin failed");
+                  }
+                }
+              }
+
+              if (records.size() != 0) {
+                bucket.preWrite(records);
+                writeStatus.addAll(writeFunction.apply(records, currentInstant));
+              } else {
+                LOG.info("No data to write in bucket of subtask [{}] for instant [{}] as of preCombine filter", taskID, currentInstant);
+              }
               records.clear();
               bucket.reset();
             }

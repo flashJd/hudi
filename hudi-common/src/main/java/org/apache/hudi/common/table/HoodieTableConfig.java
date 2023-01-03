@@ -53,11 +53,11 @@ import org.apache.log4j.Logger;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
-import java.util.HashSet;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
@@ -201,6 +201,11 @@ public class HoodieTableConfig extends HoodieConfig {
       .key("hoodie.datasource.write.drop.partition.columns")
       .defaultValue(false)
       .withDocumentation("When set to true, will not write the partition columns into hudi. By default, false.");
+
+  public static final ConfigProperty<String> PRECOMBINE_MIN = ConfigProperty
+      .key("hoodie.table.precombine.min")
+      .noDefaultValue()
+      .withDocumentation("when a record's precombine value is lower than the configured value, it will be discarded.");
 
   public static final ConfigProperty<String> URL_ENCODE_PARTITIONING = KeyGeneratorOptions.URL_ENCODE_PARTITIONING;
   public static final ConfigProperty<String> HIVE_STYLE_PARTITIONING_ENABLE = KeyGeneratorOptions.HIVE_STYLE_PARTITIONING_ENABLE;
@@ -483,6 +488,10 @@ public class HoodieTableConfig extends HoodieConfig {
 
   public String getPreCombineField() {
     return getString(PRECOMBINE_FIELD);
+  }
+
+  public String getPreCombineMin() {
+    return getString(PRECOMBINE_MIN);
   }
 
   public Option<String[]> getRecordKeyFields() {
