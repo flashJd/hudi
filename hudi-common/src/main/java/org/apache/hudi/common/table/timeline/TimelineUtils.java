@@ -24,6 +24,7 @@ import org.apache.hudi.common.model.HoodieCommitMetadata;
 import org.apache.hudi.common.model.HoodieReplaceCommitMetadata;
 import org.apache.hudi.common.model.WriteOperationType;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
+import org.apache.hudi.common.util.CollectionUtils;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.exception.HoodieIOException;
 
@@ -208,5 +209,85 @@ public class TimelineUtils {
       return archivedTimeline.mergeTimeline(activeTimeline);
     }
     return activeTimeline;
+  }
+
+  /**
+   * Returns a Hudi timeline with commits after the given instant time (exclusive).
+   *
+   * @param metaClient                {@link HoodieTableMetaClient} instance.
+   * @param exclusiveStartInstantTime Start instant time (exclusive).
+   * @return Hudi timeline.
+   */
+  public static HoodieTimeline getCommitsTimelineAfter(
+      HoodieTableMetaClient metaClient, String exclusiveStartInstantTime) {
+    HoodieActiveTimeline activeTimeline = metaClient.getActiveTimeline();
+    HoodieDefaultTimeline timeline =
+        activeTimeline.isBeforeTimelineStarts(exclusiveStartInstantTime)
+            ? metaClient.getArchivedTimeline(exclusiveStartInstantTime)
+            .mergeTimeline(activeTimeline)
+            : activeTimeline;
+    return timeline.getCommitsTimeline()
+        .findInstantsAfter(exclusiveStartInstantTime, Integer.MAX_VALUE);
+  }
+  
+  /**
+   * Returns the commit metadata of the given instant.
+   *
+   * @param instant  The hoodie instant
+   * @param timeline The timeline
+   * @return the commit metadata
+   */
+  public static HoodieCommitMetadata getCommitMetadata(
+      HoodieInstant instant,
+      HoodieTimeline timeline) throws IOException {
+    byte[] data = timeline.getInstantDetails(instant).get();
+    if (instant.getAction().equals(HoodieTimeline.REPLACE_COMMIT_ACTION)) {
+      return HoodieReplaceCommitMetadata.fromBytes(data, HoodieReplaceCommitMetadata.class);
+    } else {
+      return HoodieCommitMetadata.fromBytes(data, HoodieCommitMetadata.class);
+    }
+  }
+
+  /**
+   * Gets the qualified earliest instant from the active timeline of the data table
+   * for the archival in metadata table.
+   * <p>
+   * the qualified earliest instant is chosen as the earlier one between the earliest
+   * commit (COMMIT, DELTA_COMMIT, and REPLACE_COMMIT only, considering non-savepoint
+   * commit only if enabling archive beyond savepoint) and the earliest inflight
+   * instant (all actions).
+   *
+   * @param dataTableActiveTimeline      the active timeline of the data table.
+   * @param shouldArchiveBeyondSavepoint whether to archive beyond savepoint.
+   * @return the instant meeting the requirement.
+   */
+  public static Option<HoodieInstant> getEarliestInstantForMetadataArchival(
+      HoodieActiveTimeline dataTableActiveTimeline, boolean shouldArchiveBeyondSavepoint) {
+    // This is for commits only, not including CLEAN, ROLLBACK, etc.
+    // When archive beyond savepoint is enabled, there are chances that there could be holes
+    // in the timeline due to archival and savepoint interplay.  So, the first non-savepoint
+    // commit in the data timeline is considered as beginning of the active timeline.
+    Option<HoodieInstant> earliestCommit = shouldArchiveBeyondSavepoint
+        ? dataTableActiveTimeline.getTimelineOfActions(
+            CollectionUtils.createSet(
+                HoodieTimeline.COMMIT_ACTION, HoodieTimeline.DELTA_COMMIT_ACTION, HoodieTimeline.REPLACE_COMMIT_ACTION, HoodieTimeline.SAVEPOINT_ACTION))
+        .getFirstNonSavepointCommit()
+        : dataTableActiveTimeline.getCommitsTimeline().firstInstant();
+    // This is for all instants which are in-flight
+    Option<HoodieInstant> earliestInflight =
+        dataTableActiveTimeline.filterInflightsAndRequested().firstInstant();
+
+    if (earliestCommit.isPresent() && earliestInflight.isPresent()) {
+      if (earliestCommit.get().compareTo(earliestInflight.get()) < 0) {
+        return earliestCommit;
+      }
+      return earliestInflight;
+    } else if (earliestCommit.isPresent()) {
+      return earliestCommit;
+    } else if (earliestInflight.isPresent()) {
+      return earliestInflight;
+    } else {
+      return Option.empty();
+    }
   }
 }
