@@ -146,7 +146,7 @@ public abstract class BaseHoodieWriteClient<T extends HoodieRecordPayload, I, K,
   protected transient AsyncArchiveService asyncArchiveService;
   protected final TransactionManager txnManager;
   protected Option<Pair<HoodieInstant, Map<String, String>>> lastCompletedTxnAndMetadata = Option.empty();
-  protected Set<String> pendingInflightAndRequestedInstants;
+  protected Set<String> pendingInflightAndRequestedInstants = Collections.emptySet();
 
   /**
    * Create a write client, with new hudi index.
