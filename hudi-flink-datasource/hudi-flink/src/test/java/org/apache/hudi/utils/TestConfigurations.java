@@ -40,47 +40,66 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-/**
- * Configurations for the test.
- */
+/** Configurations for the test. */
 public class TestConfigurations {
-  private TestConfigurations() {
-  }
+  private TestConfigurations() {}
 
-  public static final DataType ROW_DATA_TYPE = DataTypes.ROW(
-          DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),// record key
-          DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
-          DataTypes.FIELD("age", DataTypes.INT()),
-          DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
-          DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
-      .notNull();
+  public static final DataType ROW_DATA_TYPE =
+      DataTypes.ROW(
+              DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)), // record key
+              DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
+              DataTypes.FIELD("age", DataTypes.INT()),
+              DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
+              DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
+          .notNull();
+
+  public static final DataType ROW_DATA_TYPE01 =
+      DataTypes.ROW(
+              DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)), // record key
+              DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
+              DataTypes.FIELD("age", DataTypes.INT()),
+              DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
+              DataTypes.FIELD("partition", DataTypes.INT()))
+          .notNull();
 
   public static final RowType ROW_TYPE = (RowType) ROW_DATA_TYPE.getLogicalType();
 
-  public static final ResolvedSchema TABLE_SCHEMA = SchemaBuilder.instance()
-      .fields(ROW_TYPE.getFieldNames(), ROW_DATA_TYPE.getChildren())
-      .build();
+  public static final RowType ROW_TYPE01 = (RowType) ROW_DATA_TYPE01.getLogicalType();
 
-  private static final List<String> FIELDS = ROW_TYPE.getFields().stream()
-      .map(RowType.RowField::asSummaryString).collect(Collectors.toList());
+  public static final ResolvedSchema TABLE_SCHEMA =
+      SchemaBuilder.instance()
+          .fields(ROW_TYPE.getFieldNames(), ROW_DATA_TYPE.getChildren())
+          .build();
 
-  public static final DataType ROW_DATA_TYPE_WIDER = DataTypes.ROW(
-          DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),// record key
-          DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
-          DataTypes.FIELD("age", DataTypes.INT()),
-          DataTypes.FIELD("salary", DataTypes.DOUBLE()),
-          DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
-          DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
-      .notNull();
+  private static final List<String> FIELDS =
+      ROW_TYPE.getFields().stream()
+          .map(RowType.RowField::asSummaryString)
+          .collect(Collectors.toList());
+
+  public static final List<String> FIELDS01 =
+      ROW_TYPE01.getFields().stream()
+          .map(RowType.RowField::asSummaryString)
+          .collect(Collectors.toList());
+
+  public static final DataType ROW_DATA_TYPE_WIDER =
+      DataTypes.ROW(
+              DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)), // record key
+              DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
+              DataTypes.FIELD("age", DataTypes.INT()),
+              DataTypes.FIELD("salary", DataTypes.DOUBLE()),
+              DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
+              DataTypes.FIELD("partition", DataTypes.VARCHAR(10)))
+          .notNull();
 
   public static final RowType ROW_TYPE_WIDER = (RowType) ROW_DATA_TYPE_WIDER.getLogicalType();
 
-  public static final DataType ROW_DATA_TYPE_DATE = DataTypes.ROW(
-          DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),// record key
-          DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
-          DataTypes.FIELD("age", DataTypes.INT()),
-          DataTypes.FIELD("dt", DataTypes.DATE()))
-      .notNull();
+  public static final DataType ROW_DATA_TYPE_DATE =
+      DataTypes.ROW(
+              DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)), // record key
+              DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
+              DataTypes.FIELD("age", DataTypes.INT()),
+              DataTypes.FIELD("dt", DataTypes.DATE()))
+          .notNull();
 
   public static final RowType ROW_TYPE_DATE = (RowType) ROW_DATA_TYPE_DATE.getLogicalType();
 
@@ -89,11 +108,9 @@ public class TestConfigurations {
   }
 
   public static String getCreateHoodieTableDDL(
-      String tableName,
-      Map<String, String> options,
-      boolean havePartition,
-      String partitionField) {
-    return getCreateHoodieTableDDL(tableName, FIELDS, options, havePartition, "uuid", partitionField);
+      String tableName, Map<String, String> options, boolean havePartition, String partitionField) {
+    return getCreateHoodieTableDDL(
+        tableName, FIELDS, options, havePartition, "uuid", partitionField);
   }
 
   public static String getCreateHoodieTableDDL(
@@ -108,16 +125,15 @@ public class TestConfigurations {
     for (String field : fields) {
       builder.append("  ").append(field).append(",\n");
     }
-    builder.append("  PRIMARY KEY(").append(pkField).append(") NOT ENFORCED\n")
-        .append(")\n");
+    builder.append("  PRIMARY KEY(").append(pkField).append(") NOT ENFORCED\n").append(")\n");
     if (havePartition) {
       builder.append("PARTITIONED BY (`").append(partitionField).append("`)\n");
     }
     final String connector = options.computeIfAbsent("connector", k -> "hudi");
-    builder.append("with (\n"
-        + "  'connector' = '").append(connector).append("'");
-    options.forEach((k, v) -> builder.append(",\n")
-        .append("  '").append(k).append("' = '").append(v).append("'"));
+    builder.append("with (\n" + "  'connector' = '").append(connector).append("'");
+    options.forEach(
+        (k, v) ->
+            builder.append(",\n").append("  '").append(k).append("' = '").append(v).append("'"));
     builder.append("\n)");
     return builder.toString();
   }
@@ -125,8 +141,7 @@ public class TestConfigurations {
   public static String getCreateHudiCatalogDDL(final String catalogName, final String catalogPath) {
     StringBuilder builder = new StringBuilder();
     builder.append("create catalog ").append(catalogName).append(" with (\n");
-    builder.append("  'type' = 'hudi',\n"
-        + "  'catalog.path' = '").append(catalogPath).append("'");
+    builder.append("  'type' = 'hudi',\n" + "  'catalog.path' = '").append(catalogPath).append("'");
     builder.append("\n)");
     return builder.toString();
   }
@@ -144,30 +159,43 @@ public class TestConfigurations {
   }
 
   public static String getFileSourceDDL(String tableName, String fileName, int checkpoints) {
-    String sourcePath = Objects.requireNonNull(Thread.currentThread()
-        .getContextClassLoader().getResource(fileName)).toString();
-    return "create table " + tableName + "(\n"
+    String sourcePath =
+        Objects.requireNonNull(Thread.currentThread().getContextClassLoader().getResource(fileName))
+            .toString();
+    return "create table "
+        + tableName
+        + "(\n"
         + "  uuid varchar(20),\n"
         + "  name varchar(10),\n"
         + "  age int,\n"
         + "  ts timestamp(3),\n"
         + "  `partition` varchar(20)\n"
         + ") with (\n"
-        + "  'connector' = '" + ContinuousFileSourceFactory.FACTORY_ID + "',\n"
-        + "  'path' = '" + sourcePath + "',\n"
-        + "  'checkpoints' = '" + checkpoints + "'\n"
+        + "  'connector' = '"
+        + ContinuousFileSourceFactory.FACTORY_ID
+        + "',\n"
+        + "  'path' = '"
+        + sourcePath
+        + "',\n"
+        + "  'checkpoints' = '"
+        + checkpoints
+        + "'\n"
         + ")";
   }
 
   public static String getCollectSinkDDL(String tableName) {
-    return "create table " + tableName + "(\n"
+    return "create table "
+        + tableName
+        + "(\n"
         + "  uuid varchar(20),\n"
         + "  name varchar(10),\n"
         + "  age int,\n"
         + "  ts timestamp(3),\n"
         + "  `partition` varchar(20)\n"
         + ") with (\n"
-        + "  'connector' = '" + CollectSinkTableFactory.FACTORY_ID + "'"
+        + "  'connector' = '"
+        + CollectSinkTableFactory.FACTORY_ID
+        + "'"
         + ")";
   }
 
@@ -176,27 +204,25 @@ public class TestConfigurations {
     String[] fieldNames = tableSchema.getFieldNames();
     DataType[] fieldTypes = tableSchema.getFieldDataTypes();
     for (int i = 0; i < fieldNames.length; i++) {
-      builder.append("  `")
-          .append(fieldNames[i])
-          .append("` ")
-          .append(fieldTypes[i].toString());
+      builder.append("  `").append(fieldNames[i]).append("` ").append(fieldTypes[i].toString());
       if (i != fieldNames.length - 1) {
         builder.append(",");
       }
       builder.append("\n");
     }
-    final String withProps = ""
-        + ") with (\n"
-        + "  'connector' = '" + CollectSinkTableFactory.FACTORY_ID + "'\n"
-        + ")";
+    final String withProps =
+        "" + ") with (\n" + "  'connector' = '" + CollectSinkTableFactory.FACTORY_ID + "'\n" + ")";
     builder.append(withProps);
     return builder.toString();
   }
 
   public static String getCsvSourceDDL(String tableName, String fileName) {
-    String sourcePath = Objects.requireNonNull(Thread.currentThread()
-        .getContextClassLoader().getResource(fileName)).toString();
-    return "create table " + tableName + "(\n"
+    String sourcePath =
+        Objects.requireNonNull(Thread.currentThread().getContextClassLoader().getResource(fileName))
+            .toString();
+    return "create table "
+        + tableName
+        + "(\n"
         + "  uuid varchar(20),\n"
         + "  name varchar(10),\n"
         + "  age int,\n"
@@ -204,7 +230,9 @@ public class TestConfigurations {
         + "  `partition` varchar(20)\n"
         + ") with (\n"
         + "  'connector' = 'filesystem',\n"
-        + "  'path' = '" + sourcePath + "',\n"
+        + "  'path' = '"
+        + sourcePath
+        + "',\n"
         + "  'format' = 'csv'\n"
         + ")";
   }
@@ -214,9 +242,11 @@ public class TestConfigurations {
   public static Configuration getDefaultConf(String tablePath) {
     Configuration conf = new Configuration();
     conf.setString(FlinkOptions.PATH, tablePath);
-    conf.setString(FlinkOptions.SOURCE_AVRO_SCHEMA_PATH,
-        Objects.requireNonNull(Thread.currentThread()
-            .getContextClassLoader().getResource("test_read_schema.avsc")).toString());
+    conf.setString(
+        FlinkOptions.SOURCE_AVRO_SCHEMA_PATH,
+        Objects.requireNonNull(
+                Thread.currentThread().getContextClassLoader().getResource("test_read_schema.avsc"))
+            .toString());
     conf.setString(FlinkOptions.TABLE_NAME, "TestHoodieTable");
     conf.setString(FlinkOptions.PARTITION_PATH_FIELD, "partition");
     return conf;
@@ -225,7 +255,9 @@ public class TestConfigurations {
   public static Configuration getDefaultConf(String tablePath, DataType dataType) {
     Configuration conf = new Configuration();
     conf.setString(FlinkOptions.PATH, tablePath);
-    conf.setString(FlinkOptions.SOURCE_AVRO_SCHEMA, AvroSchemaConverter.convertToSchema(dataType.getLogicalType()).toString());
+    conf.setString(
+        FlinkOptions.SOURCE_AVRO_SCHEMA,
+        AvroSchemaConverter.convertToSchema(dataType.getLogicalType()).toString());
     conf.setString(FlinkOptions.TABLE_NAME, "TestHoodieTable");
     conf.setString(FlinkOptions.PARTITION_PATH_FIELD, "partition");
     return conf;
@@ -234,8 +266,10 @@ public class TestConfigurations {
   public static FlinkStreamerConfig getDefaultStreamerConf(String tablePath) {
     FlinkStreamerConfig streamerConf = new FlinkStreamerConfig();
     streamerConf.targetBasePath = tablePath;
-    streamerConf.sourceAvroSchemaPath = Objects.requireNonNull(Thread.currentThread()
-        .getContextClassLoader().getResource("test_read_schema.avsc")).toString();
+    streamerConf.sourceAvroSchemaPath =
+        Objects.requireNonNull(
+                Thread.currentThread().getContextClassLoader().getResource("test_read_schema.avsc"))
+            .toString();
     streamerConf.targetTableName = "TestHoodieTable";
     streamerConf.partitionPathField = "partition";
     streamerConf.tableType = "COPY_ON_WRITE";
@@ -243,9 +277,7 @@ public class TestConfigurations {
     return streamerConf;
   }
 
-  /**
-   * Creates the tool to build hoodie table DDL.
-   */
+  /** Creates the tool to build hoodie table DDL. */
   public static Sql sql(String tableName) {
     return new Sql(tableName);
   }
@@ -258,9 +290,7 @@ public class TestConfigurations {
   //  Utilities
   // -------------------------------------------------------------------------
 
-  /**
-   * Tool to build hoodie table DDL with schema {@link #TABLE_SCHEMA}.
-   */
+  /** Tool to build hoodie table DDL with schema {@link #TABLE_SCHEMA}. */
   public static class Sql {
     private final Map<String, String> options;
     private final String tableName;
@@ -309,18 +339,26 @@ public class TestConfigurations {
       return this;
     }
 
+    public Sql fields(List<String> fieldSchemas) {
+      fields = fieldSchemas;
+      return this;
+    }
+
     public String end() {
       if (this.fields.size() == 0) {
         this.fields = FIELDS;
       }
-      return TestConfigurations.getCreateHoodieTableDDL(this.tableName, this.fields, options,
-          this.withPartition, this.pkField, this.partitionField);
+      return TestConfigurations.getCreateHoodieTableDDL(
+          this.tableName,
+          this.fields,
+          options,
+          this.withPartition,
+          this.pkField,
+          this.partitionField);
     }
   }
 
-  /**
-   * Tool to construct the catalog DDL.
-   */
+  /** Tool to construct the catalog DDL. */
   public static class Catalog {
     private final String catalogName;
     private String catalogPath = ".";
