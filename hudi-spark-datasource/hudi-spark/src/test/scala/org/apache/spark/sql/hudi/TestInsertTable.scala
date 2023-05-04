@@ -24,11 +24,32 @@ import org.apache.hudi.config.HoodieWriteConfig
 import org.apache.hudi.exception.HoodieDuplicateKeyException
 import org.apache.hudi.keygen.ComplexKeyGenerator
 import org.apache.spark.sql.SaveMode
-import org.apache.spark.sql.internal.SQLConf
 
 import java.io.File
 
 class TestInsertTable extends HoodieSparkSqlTestBase {
+
+  test("Test read table") {
+    spark.sql(
+      s"""
+         |create table t1 (
+         |  uuid string,
+         |  name string,
+         |  age int,
+         |  ts timestamp,
+         |  `partition` int
+         |) using hudi
+         | tblproperties (
+         |  primaryKey = 'uuid',
+         |  preCombineField = 'ts',
+         |  type = 'mor'
+         | )
+         | partitioned by (`partition`)
+         | location 'file:///project/hudi_module/hudi/hudi_table_test'
+         """.stripMargin)
+    spark.sql(s"select * from t1").show(10000,false)
+    spark.sql(s"select count(1) from t1").show(10000,false)
+  }
 
   test("Test Insert Into with values") {
     withTempDir { tmp =>
