@@ -91,8 +91,8 @@ public abstract class AbstractTableFileSystemView implements SyncableFileSystemV
   // Locks to control concurrency. Sync operations use write-lock blocking all fetch operations.
   // For the common-case, we allow concurrent read of single or multiple partitions
   private final ReentrantReadWriteLock globalLock = new ReentrantReadWriteLock();
-  private final ReadLock readLock = globalLock.readLock();
-  private final WriteLock writeLock = globalLock.writeLock();
+  protected final ReadLock readLock = globalLock.readLock();
+  protected final WriteLock writeLock = globalLock.writeLock();
 
   private BootstrapIndex bootstrapIndex;
 
@@ -117,7 +117,7 @@ public abstract class AbstractTableFileSystemView implements SyncableFileSystemV
 
   /**
    * Refresh commits timeline.
-   * 
+   *
    * @param visibleActiveTimeline Visible Active Timeline
    */
   protected void refreshTimeline(HoodieTimeline visibleActiveTimeline) {
@@ -274,7 +274,7 @@ public abstract class AbstractTableFileSystemView implements SyncableFileSystemV
   /**
    * Clear the resource.
    */
-  private void clear() {
+  protected void clear() {
     addedPartitions.clear();
     resetViewState();
     bootstrapIndex = null;
@@ -1150,10 +1150,10 @@ public abstract class AbstractTableFileSystemView implements SyncableFileSystemV
 
   @Override
   public void sync() {
-    HoodieTimeline oldTimeline = getTimeline();
-    HoodieTimeline newTimeline = metaClient.reloadActiveTimeline().filterCompletedAndCompactionInstants();
     try {
       writeLock.lock();
+      HoodieTimeline oldTimeline = getTimeline();
+      HoodieTimeline newTimeline = metaClient.reloadActiveTimeline().filterCompletedAndCompactionInstants();
       runSync(oldTimeline, newTimeline);
     } finally {
       writeLock.unlock();
