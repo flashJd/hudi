@@ -52,7 +52,7 @@ public class TestConfigurations {
               DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)), // record key
               DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
               DataTypes.FIELD("age", DataTypes.INT()),
-              DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
+              DataTypes.FIELD("ts", DataTypes.TIMESTAMP(6)), // precombine field
               DataTypes.FIELD("partition", DataTypes.INT()))
           .notNull();
 

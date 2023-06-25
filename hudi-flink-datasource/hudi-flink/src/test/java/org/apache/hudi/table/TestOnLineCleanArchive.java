@@ -111,7 +111,7 @@ public class TestOnLineCleanArchive {
             + "  uuid varchar(20),\n"
             + "  name varchar(10),\n"
             + "  age int,\n"
-            + "  ts timestamp(3),\n"
+            + "  ts timestamp(6),\n"
             + "  `partition` int,\n" // test streaming read with partition field in the middle
             + "  PRIMARY KEY(uuid) NOT ENFORCED\n"
             + ")\n"
@@ -133,9 +133,9 @@ public class TestOnLineCleanArchive {
     streamTableEnv.executeSql(dataGenDDL);
 
     metaDataDDL();
-    streamTableEnv.executeSql("drop table if exists t1");
     streamTableEnv.executeSql("drop table if exists t1_ro");
     streamTableEnv.executeSql("drop table if exists t1_rt");
+    streamTableEnv.executeSql("drop table if exists t1");
 
     tableDDL();
     String insertInto = "insert into t1 select * from default_catalog.default_database.datagen";
@@ -163,7 +163,7 @@ public class TestOnLineCleanArchive {
     }
 
     List<Row> rows = CollectionUtil.iterableToList(
-        () -> streamTableEnv.sqlQuery("select * from t1_ro limit 10").execute().collect());
+        () -> streamTableEnv.sqlQuery("select count(*) from t1").execute().collect());
     rows.forEach(System.out::println);
   }
 
