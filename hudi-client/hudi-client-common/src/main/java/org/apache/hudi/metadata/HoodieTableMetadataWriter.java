@@ -102,4 +102,11 @@ public interface HoodieTableMetadataWriter extends Serializable, AutoCloseable {
    * @param partitions - list of {@link MetadataPartitionType} to drop
    */
   void deletePartitions(String instantTime, List<MetadataPartitionType> partitions);
+
+  /**
+   * Set the flag whether we do incrementalAsyncIndex.
+   *
+   * @param isDoingIncrementalAsyncIndex - the flag whether we do incrementalAsyncIndex.
+   */
+  void setIsDoingIncrementalAsyncIndex(boolean isDoingIncrementalAsyncIndex);
 }

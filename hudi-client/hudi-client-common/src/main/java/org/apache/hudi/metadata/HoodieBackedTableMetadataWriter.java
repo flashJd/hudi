@@ -72,6 +72,7 @@ import org.apache.hudi.exception.HoodieMetadataException;
 import org.apache.hudi.hadoop.CachingPath;
 import org.apache.hudi.hadoop.SerializablePath;
 import org.apache.hudi.table.action.compact.strategy.UnBoundedCompactionStrategy;
+
 import org.apache.avro.specific.SpecificRecordBase;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
@@ -130,6 +131,7 @@ public abstract class HoodieBackedTableMetadataWriter implements HoodieTableMeta
   protected HoodieTableMetaClient dataMetaClient;
   protected Option<HoodieMetadataMetrics> metrics;
   protected boolean enabled;
+  protected boolean isDoingIncrementalAsyncIndex;
   protected SerializableConfiguration hadoopConf;
   protected final transient HoodieEngineContext engineContext;
   protected final List<MetadataPartitionType> enabledPartitionTypes;
@@ -803,7 +805,9 @@ public abstract class HoodieBackedTableMetadataWriter implements HoodieTableMeta
         dataWriteConfig.isMetadataColumnStatsIndexEnabled(),
         dataWriteConfig.getColumnStatsIndexParallelism(),
         dataWriteConfig.getColumnsEnabledForColumnStatsIndex(),
-        dataWriteConfig.getColumnsEnabledForBloomFilterIndex());
+        dataWriteConfig.getColumnsEnabledForBloomFilterIndex(),
+        dataWriteConfig.isMetadataIncrementalAsyncIndexEnabled(),
+        isDoingIncrementalAsyncIndex);
   }
 
   /**
@@ -969,6 +973,11 @@ public abstract class HoodieBackedTableMetadataWriter implements HoodieTableMeta
     if (metadata != null) {
       metadata.close();
     }
+  }
+
+  @Override
+  public void setIsDoingIncrementalAsyncIndex(boolean isDoingIncrementalAsyncIndex) {
+    this.isDoingIncrementalAsyncIndex = isDoingIncrementalAsyncIndex;
   }
 
   /**

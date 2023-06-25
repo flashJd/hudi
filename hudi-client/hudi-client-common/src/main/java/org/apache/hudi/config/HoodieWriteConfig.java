@@ -1823,6 +1823,10 @@ public class HoodieWriteConfig extends HoodieConfig {
     return isMetadataTableEnabled() && getMetadataConfig().isColumnStatsIndexEnabled();
   }
 
+  public boolean isMetadataIncrementalAsyncIndexEnabled() {
+    return isMetadataTableEnabled() && getMetadataConfig().isIncrementalAsyncIndexEnabled();
+  }
+
   public List<String> getColumnsEnabledForColumnStatsIndex() {
     return getMetadataConfig().getColumnsEnabledForColumnStatsIndex();
   }

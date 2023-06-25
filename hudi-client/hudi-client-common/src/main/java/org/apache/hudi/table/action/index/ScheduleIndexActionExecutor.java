@@ -84,7 +84,10 @@ public class ScheduleIndexActionExecutor<T, I, K, O> extends BaseActionExecutor<
     // make sure that it is idempotent, check with previously pending index operations.
     Set<String> indexesInflightOrCompleted = getInflightAndCompletedMetadataPartitions(table.getMetaClient().getTableConfig());
     Set<String> requestedPartitions = partitionIndexTypes.stream().map(MetadataPartitionType::getPartitionPath).collect(Collectors.toSet());
-    requestedPartitions.removeAll(indexesInflightOrCompleted);
+    if (!config.getMetadataConfig().isIncrementalAsyncIndexEnabled()) {
+      requestedPartitions.removeAll(indexesInflightOrCompleted);
+    }
+
     if (!requestedPartitions.isEmpty()) {
       LOG.warn(String.format("Following partitions already exist or inflight: %s. Going to schedule indexing of only these partitions: %s",
           indexesInflightOrCompleted, requestedPartitions));
@@ -104,7 +107,8 @@ public class ScheduleIndexActionExecutor<T, I, K, O> extends BaseActionExecutor<
         // in case FILES partition itself was not initialized before (i.e. metadata was never enabled), this will initialize synchronously
         HoodieTableMetadataWriter metadataWriter = table.getMetadataWriter(instantTime)
             .orElseThrow(() -> new HoodieIndexException(String.format("Could not get metadata writer to initialize filegroups for indexing for instant: %s", instantTime)));
-        if (!finalPartitionsToIndex.get(0).getPartitionPath().equals(MetadataPartitionType.FILES.getPartitionPath())) {
+        if (!finalPartitionsToIndex.get(0).getPartitionPath().equals(MetadataPartitionType.FILES.getPartitionPath())
+            && !indexesInflightOrCompleted.contains(finalPartitionsToIndex.get(0).getPartitionPath())) {
           // initialize metadata partition only if not for FILES partition.
           metadataWriter.initializeMetadataPartitions(table.getMetaClient(), finalPartitionsToIndex, indexUptoInstant.get().getTimestamp());
         }

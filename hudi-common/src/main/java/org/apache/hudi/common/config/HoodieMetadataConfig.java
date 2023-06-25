@@ -81,6 +81,13 @@ public final class HoodieMetadataConfig extends HoodieConfig {
       .sinceVersion("0.11.0")
       .withDocumentation("Enable asynchronous indexing of metadata table.");
 
+  // Incremental async index
+  public static final ConfigProperty<Boolean> INCREMENTAL_ASYNC_INDEX_ENABLE = ConfigProperty
+      .key(METADATA_PREFIX + ".index.async.incremental")
+      .defaultValue(false)
+      .sinceVersion("0.13.1")
+      .withDocumentation("Enable incremental asynchronous indexing of metadata table.");
+
   // Maximum delta commits before compaction occurs
   public static final ConfigProperty<Integer> COMPACT_NUM_DELTA_COMMITS = ConfigProperty
       .key(METADATA_PREFIX + ".compact.max.delta.commits")
@@ -271,6 +278,10 @@ public final class HoodieMetadataConfig extends HoodieConfig {
 
   public boolean isColumnStatsIndexEnabled() {
     return getBooleanOrDefault(ENABLE_METADATA_INDEX_COLUMN_STATS);
+  }
+
+  public boolean isIncrementalAsyncIndexEnabled() {
+    return getBooleanOrDefault(INCREMENTAL_ASYNC_INDEX_ENABLE);
   }
 
   public List<String> getColumnsEnabledForColumnStatsIndex() {

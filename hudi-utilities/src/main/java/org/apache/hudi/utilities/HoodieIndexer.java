@@ -233,7 +233,7 @@ public class HoodieIndexer {
     if (!isMetadataInitialized() && !partitionTypes.contains(MetadataPartitionType.FILES)) {
       throw new HoodieException("Metadata table is not yet initialized. Initialize FILES partition before any other partition " + Arrays.toString(partitionTypes.toArray()));
     }
-    if (indexExists(partitionTypes)) {
+    if (indexExists(partitionTypes) && !metadataConfig.isIncrementalAsyncIndexEnabled()) {
       return Option.empty();
     }
     Option<String> indexingInstant = client.scheduleIndexing(partitionTypes);

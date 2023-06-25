@@ -287,9 +287,16 @@ public class HoodieTableMetadataUtil {
       HoodieEngineContext context, HoodieCommitMetadata commitMetadata, String instantTime,
       MetadataRecordsGenerationParams recordsGenerationParams) {
     final Map<MetadataPartitionType, HoodieData<HoodieRecord>> partitionToRecordsMap = new HashMap<>();
-    final HoodieData<HoodieRecord> filesPartitionRecordsRDD = context.parallelize(
-        convertMetadataToFilesPartitionRecords(commitMetadata, instantTime), 1);
-    partitionToRecordsMap.put(MetadataPartitionType.FILES, filesPartitionRecordsRDD);
+
+    if (!recordsGenerationParams.isDoingIncrementalAsyncIndex()) {
+      final HoodieData<HoodieRecord> filesPartitionRecordsRDD = context.parallelize(
+          convertMetadataToFilesPartitionRecords(commitMetadata, instantTime), 1);
+      partitionToRecordsMap.put(MetadataPartitionType.FILES, filesPartitionRecordsRDD);
+    }
+
+    if (recordsGenerationParams.isIncrementalAsyncIndexEnabled() && !recordsGenerationParams.isDoingIncrementalAsyncIndex()) {
+      return partitionToRecordsMap;
+    }
 
     if (recordsGenerationParams.getEnabledPartitionTypes().contains(MetadataPartitionType.BLOOM_FILTERS)) {
       final HoodieData<HoodieRecord> metadataBloomFilterRecords = convertMetadataToBloomFilterRecords(context, commitMetadata, instantTime, recordsGenerationParams);
@@ -449,9 +456,16 @@ public class HoodieTableMetadataUtil {
                                                                                               MetadataRecordsGenerationParams recordsGenerationParams,
                                                                                               String instantTime) {
     final Map<MetadataPartitionType, HoodieData<HoodieRecord>> partitionToRecordsMap = new HashMap<>();
-    final HoodieData<HoodieRecord> filesPartitionRecordsRDD = engineContext.parallelize(
-        convertMetadataToFilesPartitionRecords(cleanMetadata, instantTime), 1);
-    partitionToRecordsMap.put(MetadataPartitionType.FILES, filesPartitionRecordsRDD);
+
+    if (!recordsGenerationParams.isDoingIncrementalAsyncIndex()) {
+      final HoodieData<HoodieRecord> filesPartitionRecordsRDD = engineContext.parallelize(
+          convertMetadataToFilesPartitionRecords(cleanMetadata, instantTime), 1);
+      partitionToRecordsMap.put(MetadataPartitionType.FILES, filesPartitionRecordsRDD);
+    }
+
+    if (recordsGenerationParams.isIncrementalAsyncIndexEnabled() && !recordsGenerationParams.isDoingIncrementalAsyncIndex()) {
+      return partitionToRecordsMap;
+    }
 
     if (recordsGenerationParams.getEnabledPartitionTypes().contains(MetadataPartitionType.BLOOM_FILTERS)) {
       final HoodieData<HoodieRecord> metadataBloomFilterRecordsRDD =
@@ -589,9 +603,16 @@ public class HoodieTableMetadataUtil {
     final Map<String, List<String>> partitionToDeletedFiles = new HashMap<>();
 
     processRestoreMetadata(metadataTableTimeline, restoreMetadata, partitionToAppendedFiles, partitionToDeletedFiles, lastSyncTs);
-    final HoodieData<HoodieRecord> filesPartitionRecordsRDD =
-        engineContext.parallelize(convertFilesToFilesPartitionRecords(partitionToDeletedFiles, partitionToAppendedFiles, instantTime, "Restore"), 1);
-    partitionToRecordsMap.put(MetadataPartitionType.FILES, filesPartitionRecordsRDD);
+
+    if (!recordsGenerationParams.isDoingIncrementalAsyncIndex()) {
+      final HoodieData<HoodieRecord> filesPartitionRecordsRDD =
+          engineContext.parallelize(convertFilesToFilesPartitionRecords(partitionToDeletedFiles, partitionToAppendedFiles, instantTime, "Restore"), 1);
+      partitionToRecordsMap.put(MetadataPartitionType.FILES, filesPartitionRecordsRDD);
+    }
+
+    if (recordsGenerationParams.isIncrementalAsyncIndexEnabled() && !recordsGenerationParams.isDoingIncrementalAsyncIndex()) {
+      return partitionToRecordsMap;
+    }
 
     if (recordsGenerationParams.getEnabledPartitionTypes().contains(MetadataPartitionType.BLOOM_FILTERS)) {
       final HoodieData<HoodieRecord> metadataBloomFilterRecordsRDD =
@@ -634,10 +655,16 @@ public class HoodieTableMetadataUtil {
     Map<String, List<String>> partitionToDeletedFiles = new HashMap<>();
     Map<String, Map<String, Long>> partitionToAppendedFiles = new HashMap<>();
 
-    List<HoodieRecord> filesPartitionRecords =
-        convertMetadataToRollbackRecords(metadataTableTimeline, rollbackMetadata, partitionToDeletedFiles, partitionToAppendedFiles, instantTime, lastSyncTs, wasSynced);
-    final HoodieData<HoodieRecord> rollbackRecordsRDD = engineContext.parallelize(filesPartitionRecords, 1);
-    partitionToRecordsMap.put(MetadataPartitionType.FILES, rollbackRecordsRDD);
+    if (!recordsGenerationParams.isDoingIncrementalAsyncIndex()) {
+      List<HoodieRecord> filesPartitionRecords =
+          convertMetadataToRollbackRecords(metadataTableTimeline, rollbackMetadata, partitionToDeletedFiles, partitionToAppendedFiles, instantTime, lastSyncTs, wasSynced);
+      final HoodieData<HoodieRecord> rollbackRecordsRDD = engineContext.parallelize(filesPartitionRecords, 1);
+      partitionToRecordsMap.put(MetadataPartitionType.FILES, rollbackRecordsRDD);
+    }
+
+    if (recordsGenerationParams.isIncrementalAsyncIndexEnabled() && !recordsGenerationParams.isDoingIncrementalAsyncIndex()) {
+      return partitionToRecordsMap;
+    }
 
     if (recordsGenerationParams.getEnabledPartitionTypes().contains(MetadataPartitionType.BLOOM_FILTERS)) {
       final HoodieData<HoodieRecord> metadataBloomFilterRecordsRDD =
