@@ -47,6 +47,22 @@ public class TestConfigurations {
   private TestConfigurations() {
   }
 
+  public static final DataType ROW_DATA_TYPE01 =
+      DataTypes.ROW(
+              DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)), // record key
+              DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
+              DataTypes.FIELD("age", DataTypes.INT()),
+              DataTypes.FIELD("ts", DataTypes.TIMESTAMP(3)), // precombine field
+              DataTypes.FIELD("partition", DataTypes.INT()))
+          .notNull();
+
+  public static final RowType ROW_TYPE01 = (RowType) ROW_DATA_TYPE01.getLogicalType();
+
+  public static final List<String> FIELDS01 =
+      ROW_TYPE01.getFields().stream()
+          .map(RowType.RowField::asSummaryString)
+          .collect(Collectors.toList());
+
   public static final DataType ROW_DATA_TYPE = DataTypes.ROW(
           DataTypes.FIELD("uuid", DataTypes.VARCHAR(20)),// record key
           DataTypes.FIELD("name", DataTypes.VARCHAR(10)),
@@ -368,6 +384,11 @@ public class TestConfigurations {
 
     public Sql field(String fieldSchema) {
       fields.add(fieldSchema);
+      return this;
+    }
+
+    public Sql fields(List<String> fieldSchemas) {
+      fields = fieldSchemas;
       return this;
     }
 
