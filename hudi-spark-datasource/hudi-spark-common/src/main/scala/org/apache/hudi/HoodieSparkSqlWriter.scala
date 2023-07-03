@@ -845,12 +845,6 @@ object HoodieSparkSqlWriter {
     if (operation != WriteOperationType.DELETE) {
       if (mode == SaveMode.ErrorIfExists && tableExists) {
         throw new HoodieException(s"hoodie table at $tablePath already exists.")
-      } else if (mode == SaveMode.Overwrite && tableExists && operation != WriteOperationType.INSERT_OVERWRITE_TABLE) {
-        // When user set operation as INSERT_OVERWRITE_TABLE,
-        // overwrite will use INSERT_OVERWRITE_TABLE operator in doWriteOperation
-        log.warn(s"hoodie table at $tablePath already exists. Deleting existing data & overwriting with new data.")
-        fs.delete(tablePath, true)
-        tableExists = false
       }
     } else {
       // Delete Operation only supports Append mode

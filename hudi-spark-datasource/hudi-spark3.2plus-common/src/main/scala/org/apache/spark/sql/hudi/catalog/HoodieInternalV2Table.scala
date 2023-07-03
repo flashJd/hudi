@@ -89,16 +89,15 @@ private class HoodieV1WriteBuilder(writeOptions: CaseInsensitiveStringMap,
                                      spark: SparkSession)
   extends SupportsTruncate with SupportsOverwrite with ProvidesHoodieConfig {
 
-  private var overwriteTable = false
-  private var overwritePartition = false
+  private var forceOverwrite = false
 
   override def truncate(): HoodieV1WriteBuilder = {
-    overwriteTable = true
+    forceOverwrite = true
     this
   }
 
   override def overwrite(filters: Array[Filter]): WriteBuilder = {
-    overwritePartition = true
+    forceOverwrite = true
     this
   }
 
@@ -109,7 +108,7 @@ private class HoodieV1WriteBuilder(writeOptions: CaseInsensitiveStringMap,
           alignOutputColumns(data).write.format("org.apache.hudi")
             .mode(SaveMode.Append)
             .options(buildHoodieConfig(hoodieCatalogTable) ++
-              buildHoodieInsertConfig(hoodieCatalogTable, spark, overwritePartition, overwriteTable, Map.empty, Map.empty))
+              buildHoodieInsertConfig(hoodieCatalogTable, spark, forceOverwrite, Map.empty, Map.empty))
             .save()
         }
       }

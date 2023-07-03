@@ -86,21 +86,9 @@ object InsertIntoHoodieTableCommand extends Logging with ProvidesHoodieConfig wi
           refreshTable: Boolean = true,
           extraOptions: Map[String, String] = Map.empty): Boolean = {
     val catalogTable = new HoodieCatalogTable(sparkSession, table)
+    val mode = SaveMode.Append
 
-    var mode = SaveMode.Append
-    var isOverWriteTable = false
-    var isOverWritePartition = false
-    if (overwrite && partitionSpec.isEmpty) {
-      // insert overwrite table
-      mode = SaveMode.Overwrite
-      isOverWriteTable = true
-    } else {
-      // for insert into or insert overwrite partition we use append mode.
-      mode = SaveMode.Append
-      isOverWritePartition = overwrite
-    }
-
-    val config = buildHoodieInsertConfig(catalogTable, sparkSession, isOverWritePartition, isOverWriteTable, partitionSpec, extraOptions)
+    val config = buildHoodieInsertConfig(catalogTable, sparkSession, overwrite, partitionSpec, extraOptions)
 
     val alignedQuery = alignQueryOutput(query, catalogTable, partitionSpec, sparkSession.sessionState.conf)
 
