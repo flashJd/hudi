@@ -368,6 +368,10 @@ public class StreamerUtil {
     return (long) conf.getInteger(FlinkOptions.COMPACTION_MAX_MEMORY) * 1024 * 1024;
   }
 
+  public static long getMaxChainMemoryInBytes(Configuration conf) {
+    return (long) conf.getInteger(FlinkOptions.CHAIN_MAX_MEMORY) * 1024 * 1024;
+  }
+
   public static Schema getTableAvroSchema(HoodieTableMetaClient metaClient, boolean includeMetadataFields) throws Exception {
     TableSchemaResolver schemaUtil = new TableSchemaResolver(metaClient);
     return schemaUtil.getTableAvroSchema(includeMetadataFields);

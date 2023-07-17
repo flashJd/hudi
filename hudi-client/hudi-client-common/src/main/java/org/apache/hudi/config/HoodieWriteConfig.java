@@ -504,6 +504,24 @@ public class HoodieWriteConfig extends HoodieConfig {
       .withDocumentation("When table is upgraded from pre 0.12 to 0.12, we check for \"default\" partition and fail if found one. "
           + "Users are expected to rewrite the data in those partitions. Enabling this config will bypass this validation");
 
+  public static final ConfigProperty<Boolean> TABLE_CHAIN_ENABLE = ConfigProperty
+      .key("hoodie.table.chain.enabled")
+      .defaultValue(false)
+      .sinceVersion("0.12.2")
+      .withDocumentation("Control to enable table chain");
+
+  public static final ConfigProperty<String> TABLE_CHAIN_START_DATE_COLUMN = ConfigProperty
+      .key("hoodie.table.chain.start.date.column")
+      .defaultValue("start_date")
+      .sinceVersion("0.12.2")
+      .withDocumentation("Chain table's start_date column");
+
+  public static final ConfigProperty<String> TABLE_CHAIN_END_DATE_COLUMN = ConfigProperty
+      .key("hoodie.table.chain.end.date.column")
+      .defaultValue("end_date")
+      .sinceVersion("0.12.2")
+      .withDocumentation("Chain table's end_date column");
+
   private ConsistencyGuardConfig consistencyGuardConfig;
   private FileSystemRetryConfig fileSystemRetryConfig;
 

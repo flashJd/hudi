@@ -825,6 +825,17 @@ public class FlinkOptions extends HoodieConfig {
       .noDefaultValue()
       .withDescription("The hive configuration directory, where the hive-site.xml lies in, the file should be put on the client machine");
 
+  // ------------------------------------------------------------------------
+  //  Chain Table Options
+  // ------------------------------------------------------------------------
+
+  public static final String CHAIN_LATEST_PARTITION = "2999-12-31";
+  public static final ConfigOption<Integer> CHAIN_MAX_MEMORY = ConfigOptions
+      .key("chain.max_memory")
+      .intType()
+      .defaultValue(1000) // default 1000 MB
+      .withDescription("Max memory in MB for chain table spillable map, default 100MB");
+
   // -------------------------------------------------------------------------
   //  Utilities
   // -------------------------------------------------------------------------
