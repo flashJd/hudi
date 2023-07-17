@@ -34,6 +34,7 @@ import org.apache.hudi.hive.ddl.HiveSyncMode;
 import org.apache.hudi.index.HoodieIndex;
 import org.apache.hudi.keygen.constant.KeyGeneratorOptions;
 import org.apache.hudi.keygen.constant.KeyGeneratorType;
+import org.apache.hudi.sink.bucket.ChainedTableSearchMode;
 import org.apache.hudi.table.action.cluster.ClusteringPlanPartitionFilterMode;
 
 import org.apache.flink.configuration.ConfigOption;
@@ -824,6 +825,22 @@ public class FlinkOptions extends HoodieConfig {
       .stringType()
       .noDefaultValue()
       .withDescription("The hive configuration directory, where the hive-site.xml lies in, the file should be put on the client machine");
+
+  // ------------------------------------------------------------------------
+  //  Chain Table Options
+  // ------------------------------------------------------------------------
+
+  public static final String CHAIN_LATEST_PARTITION = "2999-12-31";
+  public static final ConfigOption<Integer> CHAIN_MAX_MEMORY = ConfigOptions
+      .key("chain.max_memory")
+      .intType()
+      .defaultValue(1000) // default 1000 MB
+      .withDescription("Max memory in MB for chain table spillable map, default 100MB");
+
+  public static final ConfigOption<String> CHAIN_SEARCH_MODE = ConfigOptions.key("chain.search_mode")
+      .stringType()
+      .defaultValue(ChainedTableSearchMode.SPILL_MAP.name()) // default 1000 MB
+      .withDescription("Search mode for chained table for chain closing, default SPILL_MAP");
 
   // -------------------------------------------------------------------------
   //  Utilities
