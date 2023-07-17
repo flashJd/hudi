@@ -53,29 +53,31 @@ public class BucketStreamWriteFunction<I> extends StreamWriteFunction<I> {
 
   private int parallelism;
 
-  private int bucketNum;
+  protected int bucketNum;
 
-  private String indexKeyFields;
+  protected String indexKeyFields;
 
   /**
    * BucketID to file group mapping in each partition.
    * Map(partition -> Map(bucketId, fileID)).
    */
-  private Map<String, Map<Integer, String>> bucketIndex;
+  protected Map<String, Map<Integer, String>> bucketIndex;
+
+
 
   /**
    * Incremental bucket index of the current checkpoint interval,
    * it is needed because the bucket type('I' or 'U') should be decided based on the committed files view,
    * all the records in one bucket should have the same bucket type.
    */
-  private Set<String> incBucketIndex;
+  protected Set<String> incBucketIndex;
 
   /**
    * Constructs a BucketStreamWriteFunction.
    *
    * @param config The config options
    */
-  public BucketStreamWriteFunction(Configuration config) {
+  public  BucketStreamWriteFunction(Configuration config) {
     super(config);
   }
 
@@ -142,7 +144,7 @@ public class BucketStreamWriteFunction<I> extends StreamWriteFunction<I> {
    * Get partition_bucket -> fileID mapping from the existing hudi table.
    * This is a required operation for each restart to avoid having duplicate file ids for one bucket.
    */
-  private void bootstrapIndexIfNeed(String partition) {
+  public void bootstrapIndexIfNeed(String partition) {
     if (bucketIndex.containsKey(partition)) {
       return;
     }

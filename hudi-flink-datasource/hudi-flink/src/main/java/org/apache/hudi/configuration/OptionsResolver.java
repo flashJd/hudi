@@ -29,6 +29,8 @@ import org.apache.flink.configuration.Configuration;
 import java.util.Locale;
 import java.util.Map;
 
+import static org.apache.hudi.config.HoodieWriteConfig.TABLE_CHAIN_ENABLE;
+
 /**
  * Tool helping to resolve the flink options {@link FlinkOptions}.
  */
@@ -117,6 +119,10 @@ public class OptionsResolver {
 
   public static boolean isBucketIndexType(Configuration conf) {
     return conf.getString(FlinkOptions.INDEX_TYPE).equalsIgnoreCase(HoodieIndex.IndexType.BUCKET.name());
+  }
+
+  public static boolean isChainTableEnabled(Configuration conf) {
+    return conf.getBoolean(TABLE_CHAIN_ENABLE.key(), TABLE_CHAIN_ENABLE.defaultValue());
   }
 
   /**
