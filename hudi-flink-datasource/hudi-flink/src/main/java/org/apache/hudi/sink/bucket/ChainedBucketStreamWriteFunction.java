@@ -645,18 +645,21 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
             KeyGenUtils.getPartitionPathFromGenericRecord(baseRecord, keyGeneratorOpt);
         if (!partitionTable) {
           String nestedFieldVal =
-              (String)
                   HoodieAvroUtils.getNestedFieldVal(
                       baseRecord,
                       writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN),
                       false,
-                      false);
+                      false).toString();
           if (!nestedFieldVal.equals(FlinkOptions.CHAIN_LATEST_PARTITION)) {
             writtenRecordKeys.add(key);
             continue;
           }
         }
         hoodieKey = new HoodieKey(key, partition);
+        // get original pk
+        List<String> originKeyList =
+            BucketIdentifier.getHashKeys(hoodieKey, this.indexKeyFields);
+        String originKey = String.join(",", originKeyList);
         if (keyToNewRecords.containsKey(key)) {
           HoodieRecord<? extends HoodieRecordPayload> hoodieRecord =
               keyToNewRecords.get(key).newInstance();
@@ -670,10 +673,6 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
                         new Properties());
             if (combinedAvroRecord.isPresent()) {
               GenericRecord record = (GenericRecord) combinedAvroRecord.get();
-              // get original pk
-              List<String> originKeyList =
-                  BucketIdentifier.getHashKeys(hoodieKey, this.indexKeyFields);
-              String originKey = String.join(",", originKeyList);
               GenericRecord rewriteRecord =
                   HoodieAvroUtils.rewriteRecordWithNewSchema(
                       record, schema, Collections.emptyMap());
@@ -684,6 +683,17 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
             writtenRecordKeys.add(key);
           } catch (Exception ex) {
             throw new HoodieException("Merge hoodie record error");
+          }
+        } else {
+          try {
+            GenericRecord rewriteRecord =
+                HoodieAvroUtils.rewriteRecordWithNewSchema(
+                    baseRecord, schema, Collections.emptyMap());
+            HoodieRecord<?> rewriteBaseRecord =
+                new HoodieAvroRecord<>(hoodieKey, payloadCreation.createPayload(rewriteRecord));
+            openChainRecords.put(originKey, rewriteBaseRecord);
+          } catch (Exception ex) {
+            throw new HoodieException("Rewrite BaseRecord error.");
           }
         }
       }
