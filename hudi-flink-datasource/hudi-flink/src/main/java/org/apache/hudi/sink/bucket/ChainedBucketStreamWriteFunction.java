@@ -666,7 +666,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
                     .getData()
                     .combineAndGetUpdateValue(
                         baseRecord,
-                        new Schema.Parser().parse(writeConfig.getSchema()),
+                        schemaWithMeta,
                         new Properties());
             if (combinedAvroRecord.isPresent()) {
               GenericRecord record = (GenericRecord) combinedAvroRecord.get();
@@ -699,11 +699,14 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
       HoodieRecord<? extends HoodieRecordPayload> hoodieRecord = newRecordsItr.next();
       if (!writtenRecordKeys.contains(hoodieRecord.getRecordKey())) {
         BaseAvroPayload payload = (BaseAvroPayload) hoodieRecord.getData();
+        if (payload.recordBytes.length == 0) {
+          continue;
+        }
         GenericRecord indexedRecord;
         try {
           indexedRecord = HoodieAvroUtils.bytesToAvro(payload.recordBytes, schemaWithMeta);
         } catch (Exception ex) {
-          throw new HoodieException("Record bytesToAvro error");
+          throw new HoodieException("Record bytesToAvro error:", ex);
         }
         if (!partitionTable) {
           String nestedFieldVal =
