@@ -24,7 +24,6 @@ import org.apache.hudi.common.model.BaseAvroPayload;
 import org.apache.hudi.common.model.FileSlice;
 import org.apache.hudi.common.model.HoodieAvroRecord;
 import org.apache.hudi.common.model.HoodieBaseFile;
-import org.apache.hudi.common.model.HoodieFileGroup;
 import org.apache.hudi.common.model.HoodieKey;
 import org.apache.hudi.common.model.HoodieLogFile;
 import org.apache.hudi.common.model.HoodieRecord;
@@ -32,6 +31,7 @@ import org.apache.hudi.common.model.HoodieRecordLocation;
 import org.apache.hudi.common.model.HoodieRecordPayload;
 import org.apache.hudi.common.table.log.HoodieMergedLogRecordScanner;
 import org.apache.hudi.common.table.timeline.HoodieTimeline;
+import org.apache.hudi.common.table.view.TableFileSystemView;
 import org.apache.hudi.common.util.CollectionUtils;
 import org.apache.hudi.common.util.DefaultSizeEstimator;
 import org.apache.hudi.common.util.Option;
@@ -250,8 +250,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
         UserGroupInformation ugi =
             UserGroupInformation.loginUserFromKeytabAndReturnUGI(principal, keytab);
         return ugi.doAs(
-            (PrivilegedExceptionAction<Connection>)
-                () -> (Connection) ConnectionFactory.createConnection(hbaseConfig));
+            (PrivilegedExceptionAction<Connection>) () -> (Connection) ConnectionFactory.createConnection(hbaseConfig));
       } else {
         return ConnectionFactory.createConnection(hbaseConfig);
       }
@@ -300,13 +299,16 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
       } else {
         unSentRecords.put(originKey, mergedRecord);
         if (unSentRecords.size() >= writeConfig.getHbaseIndexPutBatchSize()) {
-          try (BufferedMutator mutator = hbaseConnection.getBufferedMutator(TableName.valueOf(writeConfig.getHbaseTableName()))) {
+          try (BufferedMutator mutator =
+              hbaseConnection.getBufferedMutator(
+                  TableName.valueOf(writeConfig.getHbaseTableName()))) {
             List<Mutation> mutations = new ArrayList<>();
             for (String key : unSentRecords.keySet()) {
               Put put = new Put(Bytes.toBytes(key));
               HoodieRecord<?> unSentRecord = unSentRecords.get(key);
               BaseAvroPayload payload = (BaseAvroPayload) unSentRecord.getData();
-              // put.addColumn(SYSTEM_COLUMN_FAMILY, COMMIT_TS_COLUMN, Bytes.toBytes(loc.get().getInstantTime()));
+              // put.addColumn(SYSTEM_COLUMN_FAMILY, COMMIT_TS_COLUMN,
+              // Bytes.toBytes(loc.get().getInstantTime()));
               put.addColumn(SYSTEM_COLUMN_FAMILY, AVRO_DATA, payload.recordBytes);
               mutations.add(put);
             }
@@ -492,13 +494,21 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
 
     // Load existing fileID belongs to this task
     Map<Integer, String> bucketToFileIDMap = new HashMap<>();
-    this.writeClient
-        .getHoodieTable()
-        .getFileSystemView()
-        .getAllFileGroups(partition)
+    TableFileSystemView fsView = this.writeClient.getHoodieTable().getHoodieView();
+    if (!fsView.getLastInstant().isPresent()) {
+      LOG.info("No instant completed now, exit bootstrapIndexIfNeed.");
+      return;
+    }
+    String latestCommit = fsView.getLastInstant().get().getTimestamp();
+    if (!(fsView instanceof TableFileSystemView.SliceViewWithLatestSlice)) {
+      throw new RuntimeException(
+          "fsView is not a instance of TableFileSystemView.SliceViewWithLatestSlice");
+    }
+    ((TableFileSystemView.SliceViewWithLatestSlice) fsView)
+        .getLatestMergedFileSlicesBeforeOrOn(partition, latestCommit)
         .forEach(
-            fileGroup -> {
-              String fileID = fileGroup.getFileGroupId().getFileId();
+            fileSlice -> {
+              String fileID = fileSlice.getFileId();
               int bucketNumber = BucketIdentifier.bucketIdFromFileId(fileID);
               // use LATEST_PARTITION in partitioned table as the same bucket in other partitions
               // must be written in the same task
@@ -524,7 +534,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
                   // get bucket data in the latest partition and put it to the ExternalSpillableMap
                   if (partition.equals(FlinkOptions.CHAIN_LATEST_PARTITION)
                       || partition.equals("")) {
-                    getRecordsInBucket(!partition.equals(""), fileGroup);
+                    getRecordsInBucket(!partition.equals(""), fileSlice);
                   }
                 }
               }
@@ -551,12 +561,11 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
     }
   }
 
-  private void getRecordsInBucket(boolean partitionTable, HoodieFileGroup fileGroup) {
+  private void getRecordsInBucket(boolean partitionTable, FileSlice latestFileSlice) {
     if (!config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.SPILL_MAP.name())) {
       return;
     }
 
-    FileSlice latestFileSlice = fileGroup.getLatestFileSlice().orElse(null);
     HoodieBaseFile baseFile;
     HoodieFileReader<GenericRecord> baseFileReader;
     Iterator<GenericRecord> baseReaderIterator;
