@@ -78,7 +78,9 @@ public class TestHoodieChainedTable {
     tableDDL(partitionMode);
 
     String insertInto =
-        "insert into t1 values('id1','Fabian',31,TIMESTAMP '2023-05-03 00:00:04', Date '2023-05-03', Date '2999-12-31'),"
+        "insert into t1 values('id0','lisa',18,TIMESTAMP '2023-05-02 00:00:13', Date '2023-05-02', Date '2999-12-31'),"
+            + "('id0','lisa',19,TIMESTAMP '2023-05-03 00:00:02', Date '2023-05-03', Date '2999-12-31'),"
+            + "('id1','Fabian',31,TIMESTAMP '2023-05-03 00:00:04', Date '2023-05-03', Date '2999-12-31'),"
             + "('id2','jian',20,TIMESTAMP '2023-05-03 00:00:15', Date '2023-05-03', Date '2999-12-31')";
     execInsertSql(streamTableEnv, insertInto);
     String insertInto1 =
@@ -96,7 +98,9 @@ public class TestHoodieChainedTable {
             .collect(Collectors.toList())
             .toString();
     String expected =
-        "[+I[id1, Fabian, 31, 2023-05-03T00:00:04, 2023-05-03, 2023-05-06], "
+        "[+I[id0, lisa, 18, 2023-05-02T00:00:13, 2023-05-02, 2023-05-03], "
+            + "+I[id0, lisa, 19, 2023-05-03T00:00:02, 2023-05-03, 2999-12-31], "
+            + "+I[id1, Fabian, 31, 2023-05-03T00:00:04, 2023-05-03, 2023-05-06], "
             + "+I[id2, jian, 21, 2023-05-03T00:00:18, 2023-05-03, 2999-12-31], "
             + "+I[id1, Fabian, 35, 2023-05-06T00:00:06, 2023-05-06, 2999-12-31], "
             + "+I[id3, yong, 30, 2023-05-06T00:00:28, 2023-05-06, 2999-12-31]]";
