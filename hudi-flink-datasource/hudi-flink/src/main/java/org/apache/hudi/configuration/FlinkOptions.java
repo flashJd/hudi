@@ -911,7 +911,7 @@ public class FlinkOptions extends HoodieConfig {
   public static final ConfigOption<Integer> CHAIN_MAX_MEMORY =
       ConfigOptions.key("chain.max_memory")
           .intType()
-          .defaultValue(1000) // default 1000 MB
+          .defaultValue(100) // default 1000 MB
           .withDescription("Max memory in MB for chain table spillable map, default 100MB");
 
   public static final ConfigOption<String> CHAIN_SEARCH_MODE =

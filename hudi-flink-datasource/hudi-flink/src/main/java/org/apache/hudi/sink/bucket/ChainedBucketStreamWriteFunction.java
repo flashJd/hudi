@@ -222,6 +222,36 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
     }
   }
 
+  private void updateChainIndex(String originKey, HoodieRecord<?> record) {
+    if (config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.SPILL_MAP.name())) {
+      openChainRecords.put(originKey, record);
+    } else {
+      unSentRecords.put(originKey, record);
+      if (unSentRecords.size() >= writeConfig.getHbaseIndexPutBatchSize()) {
+        try (BufferedMutator mutator =
+                 hbaseConnection.getBufferedMutator(
+                     TableName.valueOf(writeConfig.getHbaseTableName()))) {
+          List<Mutation> mutations = new ArrayList<>();
+          for (String key : unSentRecords.keySet()) {
+            Put put = new Put(Bytes.toBytes(key));
+            HoodieRecord<?> unSentRecord = unSentRecords.get(key);
+            BaseAvroPayload payload = (BaseAvroPayload) unSentRecord.getData();
+            // put.addColumn(SYSTEM_COLUMN_FAMILY, COMMIT_TS_COLUMN,
+            // Bytes.toBytes(loc.get().getInstantTime()));
+            put.addColumn(SYSTEM_COLUMN_FAMILY, AVRO_DATA, payload.recordBytes);
+            mutations.add(put);
+          }
+          mutator.mutate(mutations);
+          mutator.flush();
+          mutations.clear();
+          unSentRecords.clear();
+        } catch (IOException e) {
+          throw new HoodieException("HBase client failed.", e);
+        }
+      }
+    }
+  }
+
   private Connection getHBaseConnection() {
     org.apache.hadoop.conf.Configuration hbaseConfig = HBaseConfiguration.create();
     String quorum = writeConfig.getHbaseZkQuorum();
@@ -294,33 +324,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
           new HoodieAvroRecord<>(
               record.getKey(), payloadCreation.createPayload(mergedIndexedRecord));
       bufferRecord(record);
-      if (config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.SPILL_MAP.name())) {
-        openChainRecords.put(originKey, mergedRecord);
-      } else {
-        unSentRecords.put(originKey, mergedRecord);
-        if (unSentRecords.size() >= writeConfig.getHbaseIndexPutBatchSize()) {
-          try (BufferedMutator mutator =
-              hbaseConnection.getBufferedMutator(
-                  TableName.valueOf(writeConfig.getHbaseTableName()))) {
-            List<Mutation> mutations = new ArrayList<>();
-            for (String key : unSentRecords.keySet()) {
-              Put put = new Put(Bytes.toBytes(key));
-              HoodieRecord<?> unSentRecord = unSentRecords.get(key);
-              BaseAvroPayload payload = (BaseAvroPayload) unSentRecord.getData();
-              // put.addColumn(SYSTEM_COLUMN_FAMILY, COMMIT_TS_COLUMN,
-              // Bytes.toBytes(loc.get().getInstantTime()));
-              put.addColumn(SYSTEM_COLUMN_FAMILY, AVRO_DATA, payload.recordBytes);
-              mutations.add(put);
-            }
-            mutator.mutate(mutations);
-            mutator.flush();
-            mutations.clear();
-            unSentRecords.clear();
-          } catch (IOException e) {
-            throw new HoodieException("HBase client failed.", e);
-          }
-        }
-      }
+      updateChainIndex(originKey, mergedRecord);
     } else if (newStartDate.compareTo(oldStartDate) > 0) {
       // bootstrap new_start_date partition
       final HoodieRecordLocation closeChainLocation;
@@ -347,11 +351,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
       }
       // add newStartDate record in 2999 partition
       bufferRecord(record);
-      if (config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.SPILL_MAP.name())) {
-        openChainRecords.put(originKey, record);
-      } else {
-        unSentRecords.put(originKey, record);
-      }
+      updateChainIndex(originKey, record);
       if (!partition.equals("")) {
         // delete oldStartDate record in 2999 partition
         HoodieRecord<?> deleteRecord =
@@ -562,16 +562,13 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
   }
 
   private void getRecordsInBucket(boolean partitionTable, FileSlice latestFileSlice) {
-    if (!config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.SPILL_MAP.name())) {
+    if (!config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.SPILL_MAP.name()) || latestFileSlice == null) {
       return;
     }
 
     HoodieBaseFile baseFile;
     HoodieFileReader<GenericRecord> baseFileReader;
     Iterator<GenericRecord> baseReaderIterator;
-    if (latestFileSlice == null) {
-      return;
-    }
 
     Schema schemaWithMeta = schema;
     if (metaClient.getTableConfig().populateMetaFields()) {
@@ -586,8 +583,8 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
     List<String> logFiles =
         latestFileSlice
             .getLogFiles()
-            .map(HoodieLogFile::getPath)
-            .map(Path::toString)
+            .sorted(HoodieLogFile.getLogFileComparator())
+            .map(logFile -> logFile.getPath().toString())
             .collect(toList());
     String maxInstantTime =
         metaClient
@@ -673,6 +670,16 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
                         new Properties());
             if (combinedAvroRecord.isPresent()) {
               GenericRecord record = (GenericRecord) combinedAvroRecord.get();
+              String nestedFieldVal =
+                  HoodieAvroUtils.getNestedFieldVal(
+                      record,
+                      writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN),
+                      false,
+                      false).toString();
+              if (!nestedFieldVal.equals(FlinkOptions.CHAIN_LATEST_PARTITION)) {
+                writtenRecordKeys.add(key);
+                continue;
+              }
               GenericRecord rewriteRecord =
                   HoodieAvroUtils.rewriteRecordWithNewSchema(
                       record, schema, Collections.emptyMap());
