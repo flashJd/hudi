@@ -29,7 +29,9 @@ import org.apache.hudi.common.model.HoodieLogFile;
 import org.apache.hudi.common.model.HoodieRecord;
 import org.apache.hudi.common.model.HoodieRecordLocation;
 import org.apache.hudi.common.model.HoodieRecordPayload;
+import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.log.HoodieMergedLogRecordScanner;
+import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.common.table.timeline.HoodieTimeline;
 import org.apache.hudi.common.table.view.TableFileSystemView;
 import org.apache.hudi.common.util.CollectionUtils;
@@ -60,6 +62,8 @@ import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.BufferedMutator;
@@ -116,6 +120,10 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
 
   private static final byte[] AVRO_DATA = Bytes.toBytes("avro_data");
 
+  private static final byte[] COMMIT_TS_COLUMN = Bytes.toBytes("commit_ts");
+
+  public static final int HBASE_READ_VERSION = 5;
+
   /**
    * Chain table's original pk to HoodieRecord mapping in 2999 partition. Map(original pk ->
    * HoodieRecord).
@@ -146,11 +154,18 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
     super(config);
   }
 
+  private boolean checkIfValidCommit(HoodieTableMetaClient metaClient, String commitTs) {
+    HoodieTimeline commitTimeline = metaClient.getCommitsTimeline().filterCompletedInstants();
+    // Check if the last commit ts for this row is 1) present in the timeline or
+    // 2) is less than the first commit ts in the timeline
+    return !commitTimeline.empty()
+        && commitTimeline.containsOrBeforeTimelineStarts(commitTs);
+  }
+
   private void procoseeUncheckedRecordsWithHbase(List<HoodieRecord<?>> records) {
     // Use originKey to get old records stored in hbase
     Result[] results;
     List<HoodieRecord<?>> comingRecordsInHbase = new ArrayList<>();
-    List<HoodieRecord<?>> oldRecordsInMemory = new ArrayList<>();
     List<HoodieRecord<?>> comingRecordsInMemory = new ArrayList<>();
     try (HTable hTable =
         (HTable) hbaseConnection.getTable(TableName.valueOf(writeConfig.getHbaseTableName()))) {
@@ -165,7 +180,6 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
               statements.add(generateStatement(originKey));
               comingRecordsInHbase.add(record);
             } else {
-              oldRecordsInMemory.add(unSentRecord);
               comingRecordsInMemory.add(record);
             }
           });
@@ -175,50 +189,156 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
     }
 
     // Compare record with old record to do chain closing
-    for (int i = 0; i < oldRecordsInMemory.size(); i++) {
+    for (int i = 0; i < comingRecordsInMemory.size(); i++) {
       HoodieRecord<?> comingHoodieRecord = comingRecordsInMemory.get(i);
+      List<String> originKeyList =
+          BucketIdentifier.getHashKeys(comingHoodieRecord.getKey(), this.indexKeyFields);
+      String originKey = String.join(",", originKeyList);
+      HoodieRecord<?> unSentRecord = unSentRecords.get(originKey);
       try {
         doChain(
-            comingHoodieRecord, oldRecordsInMemory.get(i), comingHoodieRecord.getPartitionPath());
+            comingHoodieRecord, unSentRecord, comingHoodieRecord.getPartitionPath());
       } catch (Exception e) {
         throw new HoodieException("Failed to doChain.", e);
       }
     }
 
+    List<HoodieRecord<?>> comingRecordRowKeysToRollback = new ArrayList<>();
     for (int i = 0; i < results.length; i++) {
       Result result = results[i];
       HoodieRecord<?> record = comingRecordsInHbase.get(i);
-      if (result.getRow() == null) {
-        // new record without old record
-        bufferRecord(record);
+      List<String> originKeyList =
+          BucketIdentifier.getHashKeys(record.getKey(), this.indexKeyFields);
+      String originKey = String.join(",", originKeyList);
+      HoodieRecord<?> unSentRecord = unSentRecords.get(originKey);
+      if (unSentRecord == null) {
+        if (result.getRow() == null) {
+          // new record without old record
+          bufferRecord(record);
+          updateChainIndex(originKey, record);
+        } else {
+          byte[] avroBytes = result.getValue(SYSTEM_COLUMN_FAMILY, AVRO_DATA);
+          String commitTs = Bytes.toString(result.getValue(SYSTEM_COLUMN_FAMILY, COMMIT_TS_COLUMN));
+          if (!checkIfValidCommit(this.metaClient, commitTs)) {
+            comingRecordRowKeysToRollback.add(record);
+            continue;
+          }
+          try {
+            GenericRecord indexedRecord = HoodieAvroUtils.bytesToAvro(avroBytes, schema);
+            String key = KeyGenUtils.getRecordKeyFromGenericRecord(indexedRecord, keyGeneratorOpt);
+            String partition =
+                KeyGenUtils.getPartitionPathFromGenericRecord(indexedRecord, keyGeneratorOpt);
+            HoodieKey hoodieKey = new HoodieKey(key, partition);
+            HoodieRecord<?> oldHoodieRecord =
+                new HoodieAvroRecord<>(hoodieKey, payloadCreation.createPayload(indexedRecord));
+            doChain(record, oldHoodieRecord, record.getPartitionPath());
+          } catch (Exception e) {
+            throw new HoodieException("Failed to construct oldHoodieRecord and doChain.", e);
+          }
+        }
       } else {
-        byte[] avroBytes = result.getValue(SYSTEM_COLUMN_FAMILY, AVRO_DATA);
         try {
-          GenericRecord indexedRecord = HoodieAvroUtils.bytesToAvro(avroBytes, schema);
-          String key = KeyGenUtils.getRecordKeyFromGenericRecord(indexedRecord, keyGeneratorOpt);
-          String partition =
-              KeyGenUtils.getPartitionPathFromGenericRecord(indexedRecord, keyGeneratorOpt);
-          HoodieKey hoodieKey = new HoodieKey(key, partition);
-          HoodieRecord<?> oldHoodieRecord =
-              new HoodieAvroRecord<>(hoodieKey, payloadCreation.createPayload(indexedRecord));
-          doChain(record, oldHoodieRecord, record.getPartitionPath());
+          doChain(record, unSentRecord, record.getPartitionPath());
         } catch (Exception e) {
-          throw new HoodieException("Failed to construct oldHoodieRecord and doChain.", e);
+          throw new HoodieException("Failed to doChain.", e);
+        }
+      }
+    }
+
+    Result[] rowKeysToRollbackResults;
+    try (HTable hTable =
+             (HTable) hbaseConnection.getTable(TableName.valueOf(writeConfig.getHbaseTableName()))) {
+      List<Get> statements = new ArrayList<>();
+      comingRecordRowKeysToRollback.forEach(
+          record -> {
+            List<String> originKeyList =
+                BucketIdentifier.getHashKeys(record.getKey(), this.indexKeyFields);
+            String originKey = String.join(",", originKeyList);
+            statements.add(generateStatement(originKey,HBASE_READ_VERSION));
+          });
+      rowKeysToRollbackResults = hTable.get(statements);
+    } catch (IOException e) {
+      throw new HoodieException("Failed to get old rollback record with HBase Client", e);
+    }
+
+    for (int i = 0; i < rowKeysToRollbackResults.length; i++) {
+      Result result = rowKeysToRollbackResults[i];
+      HoodieRecord<?> record = comingRecordRowKeysToRollback.get(i);
+      List<String> originKeyList =
+          BucketIdentifier.getHashKeys(record.getKey(), this.indexKeyFields);
+      String originKey = String.join(",", originKeyList);
+      HoodieRecord<?> unSentRecord = unSentRecords.get(originKey);
+      if (unSentRecord == null) {
+        List<Cell> cells = result.getColumnCells(SYSTEM_COLUMN_FAMILY, COMMIT_TS_COLUMN);
+        int j = 1;
+        for (; j < cells.size(); j++) {
+          Cell cell = cells.get(j);
+          String commitTs = Bytes.toString(CellUtil.cloneValue(cell));
+          if (!checkIfValidCommit(this.metaClient, commitTs)) {
+            continue;
+          }
+          try {
+            byte[] avroBytes = CellUtil.cloneValue(result.getColumnCells(SYSTEM_COLUMN_FAMILY, AVRO_DATA).get(j));
+            GenericRecord indexedRecord = HoodieAvroUtils.bytesToAvro(avroBytes, schema);
+            String key = KeyGenUtils.getRecordKeyFromGenericRecord(indexedRecord, keyGeneratorOpt);
+            String partition =
+                KeyGenUtils.getPartitionPathFromGenericRecord(indexedRecord, keyGeneratorOpt);
+            HoodieKey hoodieKey = new HoodieKey(key, partition);
+            HoodieRecord<?> oldHoodieRecord =
+                new HoodieAvroRecord<>(hoodieKey, payloadCreation.createPayload(indexedRecord));
+            doChain(record, oldHoodieRecord, record.getPartitionPath());
+          } catch (Exception e) {
+            throw new HoodieException("Failed to construct oldHoodieRecord and doChain.", e);
+          }
+          break;
+        }
+
+        if (j == cells.size()) {
+          // No need to delete the rowKey in hbase, as updateChainIndex will overwrite it
+          bufferRecord(record);
+          updateChainIndex(originKey, record);
+        }
+      } else {
+        try {
+          doChain(record, unSentRecord, record.getPartitionPath());
+        } catch (Exception e) {
+          throw new HoodieException("Failed to doChain.", e);
         }
       }
     }
   }
 
-  private void flushRemainingUncheckedRecords() {
+  private void bufferUnCheckedRecords(HoodieRecord<?> value) {
+    unCheckedRecords.add(value);
+    if (unCheckedRecords.size() >= writeConfig.getHbaseIndexGetBatchSize()) {
+      processUnCheckedRecords();
+    }
+  }
+
+  private void processUnCheckedRecords() {
     procoseeUncheckedRecordsWithHbase(unCheckedRecords);
     unCheckedRecords.clear();
   }
 
-  private void bufferUnCheckedRecords(HoodieRecord<?> value) {
-    unCheckedRecords.add(value);
-    if (unCheckedRecords.size() >= writeConfig.getHbaseIndexGetBatchSize()) {
-      procoseeUncheckedRecordsWithHbase(unCheckedRecords);
-      unCheckedRecords.clear();
+  private void updateChainHbaseIndex() {
+    try (BufferedMutator mutator =
+             hbaseConnection.getBufferedMutator(
+                 TableName.valueOf(writeConfig.getHbaseTableName()))) {
+      List<Mutation> mutations = new ArrayList<>();
+      for (String key : unSentRecords.keySet()) {
+        Put put = new Put(Bytes.toBytes(key));
+        HoodieRecord<?> unSentRecord = unSentRecords.get(key);
+        BaseAvroPayload payload = (BaseAvroPayload) unSentRecord.getData();
+        put.addColumn(SYSTEM_COLUMN_FAMILY, AVRO_DATA, payload.recordBytes);
+        put.addColumn(SYSTEM_COLUMN_FAMILY, COMMIT_TS_COLUMN, Bytes.toBytes(this.currentInstant));
+        mutations.add(put);
+      }
+      mutator.mutate(mutations);
+      mutator.flush();
+      mutations.clear();
+      unSentRecords.clear();
+    } catch (IOException e) {
+      throw new HoodieException("HBase client failed.", e);
     }
   }
 
@@ -227,28 +347,6 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
       openChainRecords.put(originKey, record);
     } else {
       unSentRecords.put(originKey, record);
-      if (unSentRecords.size() >= writeConfig.getHbaseIndexPutBatchSize()) {
-        try (BufferedMutator mutator =
-                 hbaseConnection.getBufferedMutator(
-                     TableName.valueOf(writeConfig.getHbaseTableName()))) {
-          List<Mutation> mutations = new ArrayList<>();
-          for (String key : unSentRecords.keySet()) {
-            Put put = new Put(Bytes.toBytes(key));
-            HoodieRecord<?> unSentRecord = unSentRecords.get(key);
-            BaseAvroPayload payload = (BaseAvroPayload) unSentRecord.getData();
-            // put.addColumn(SYSTEM_COLUMN_FAMILY, COMMIT_TS_COLUMN,
-            // Bytes.toBytes(loc.get().getInstantTime()));
-            put.addColumn(SYSTEM_COLUMN_FAMILY, AVRO_DATA, payload.recordBytes);
-            mutations.add(put);
-          }
-          mutator.mutate(mutations);
-          mutator.flush();
-          mutations.clear();
-          unSentRecords.clear();
-        } catch (IOException e) {
-          throw new HoodieException("HBase client failed.", e);
-        }
-      }
     }
   }
 
@@ -292,6 +390,14 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
 
   private Get generateStatement(String key) {
     return new Get(Bytes.toBytes(key));
+  }
+
+  private Get generateStatement(String key, int version) {
+    try {
+      return new Get(Bytes.toBytes(key)).readVersions(version);
+    } catch (Exception ex) {
+      throw new HoodieException("Hbase get with version failed.", ex);
+    }
   }
 
   private void doChain(HoodieRecord<?> record, HoodieRecord<?> oldHoodieRecord, String partition)
@@ -421,11 +527,31 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
   }
 
   @Override
+  public void updateCurrentInstant() {
+    super.updateCurrentInstant();
+    if (config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.HBASE.name())) {
+      updateChainHbaseIndex();
+      this.metaClient.reloadActiveTimeline();
+      List<HoodieInstant> instants = this.metaClient.getActiveTimeline().getInstants().collect(toList());
+      instants.add(new HoodieInstant(false, HoodieTimeline.DELTA_COMMIT_ACTION, this.currentInstant));
+      this.metaClient.getActiveTimeline().setInstants(instants);
+    }
+  }
+
+  @Override
   public void snapshotState() {
     if (config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.HBASE.name())) {
-      flushRemainingUncheckedRecords();
+      processUnCheckedRecords();
     }
     super.snapshotState();
+  }
+
+  @Override
+  public void endInput() {
+    if (config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.HBASE.name())) {
+      processUnCheckedRecords();
+    }
+    super.endInput();
   }
 
   @Override

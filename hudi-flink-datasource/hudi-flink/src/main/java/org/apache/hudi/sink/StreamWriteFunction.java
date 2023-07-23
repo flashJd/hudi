@@ -439,13 +439,17 @@ public class StreamWriteFunction<I> extends AbstractStreamWriteFunction<I> {
     return true;
   }
 
-  @SuppressWarnings("unchecked, rawtypes")
-  private void flushRemaining(boolean endInput) {
+  public void updateCurrentInstant() {
     this.currentInstant = instantToWrite(hasData());
     if (this.currentInstant == null) {
       // in case there are empty checkpoints that has no input data
       throw new HoodieException("No inflight instant when flushing data!");
     }
+  }
+
+  @SuppressWarnings("unchecked, rawtypes")
+  private void flushRemaining(boolean endInput) {
+    updateCurrentInstant();
     final List<WriteStatus> writeStatus;
     if (buckets.size() > 0) {
       writeStatus = new ArrayList<>();
