@@ -102,6 +102,7 @@ import static org.apache.hadoop.hbase.security.SecurityConstants.REGIONSERVER_KR
 import static org.apache.hadoop.hbase.security.User.HBASE_SECURITY_AUTHORIZATION_CONF_KEY;
 import static org.apache.hadoop.hbase.security.User.HBASE_SECURITY_CONF_KEY;
 import static org.apache.hudi.configuration.FlinkOptions.CHAIN_SEARCH_MODE;
+import static org.apache.hudi.configuration.FlinkOptions.HIVE_STYLE_PARTITIONING;
 
 /**
  * A stream write function with bucket hash index with chain table enabled.
@@ -116,7 +117,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
 
   private static final Logger LOG = LoggerFactory.getLogger(ChainedBucketStreamWriteFunction.class);
 
-  private static final byte[] SYSTEM_COLUMN_FAMILY = Bytes.toBytes("_ss");
+  private static final byte[] SYSTEM_COLUMN_FAMILY = Bytes.toBytes("ss");
 
   private static final byte[] AVRO_DATA = Bytes.toBytes("avro_data");
 
@@ -437,9 +438,10 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
       final String closeBucketId;
       Map<Integer, String> closeBucketToFileId;
       if (!partition.equals("")) {
-        bootstrapIndexIfNeed(newStartDate);
-        closeBucketToFileId = bucketIndex.computeIfAbsent(newStartDate, p -> new HashMap<>());
-        closeBucketId = newStartDate + bucketNum;
+        String closeChainPartiton = config.getBoolean(HIVE_STYLE_PARTITIONING) ? writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN) + "=" + newStartDate : newStartDate;
+        bootstrapIndexIfNeed(closeChainPartiton);
+        closeBucketToFileId = bucketIndex.computeIfAbsent(closeChainPartiton, p -> new HashMap<>());
+        closeBucketId = closeChainPartiton + bucketNum;
       } else {
         closeBucketToFileId = bucketIndex.computeIfAbsent(partition, p -> new HashMap<>());
         closeBucketId = "" + bucketNum;
@@ -476,10 +478,16 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
       oldIndexedRecord.put(
           writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN),
           (int) LocalDate.parse(newStartDate).toEpochDay());
+      String closeChainRecordPartition;
+      if (partition.equals("")) {
+        closeChainRecordPartition = "";
+      } else {
+        closeChainRecordPartition = config.getBoolean(HIVE_STYLE_PARTITIONING) ? writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN) + "=" + newStartDate : newStartDate;
+      }
       HoodieRecord<?> closeChainRecord =
           new HoodieAvroRecord<>(
               new HoodieKey(
-                  oldHoodieRecord.getRecordKey(), partition.equals("") ? partition : newStartDate),
+                  oldHoodieRecord.getRecordKey(), closeChainRecordPartition),
               payloadCreation.createPayload(oldIndexedRecord));
       closeChainRecord.unseal();
       closeChainRecord.setCurrentLocation(closeChainLocation);
@@ -638,8 +646,13 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
               int bucketNumber = BucketIdentifier.bucketIdFromFileId(fileID);
               // use LATEST_PARTITION in partitioned table as the same bucket in other partitions
               // must be written in the same task
-              String keyByPartiton =
-                  partition.equals("") ? partition : FlinkOptions.CHAIN_LATEST_PARTITION;
+              String keyByPartiton;
+              if (partition.equals("")) {
+                keyByPartiton = "";
+              } else {
+                keyByPartiton = config.getBoolean(HIVE_STYLE_PARTITIONING)
+                    ? writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN) + "=" + FlinkOptions.CHAIN_LATEST_PARTITION : FlinkOptions.CHAIN_LATEST_PARTITION;
+              }
               if (isBucketToLoad(bucketNumber, keyByPartiton)) {
                 LOG.info(
                     String.format(
@@ -658,7 +671,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
                           fileID, bucketNumber, partition));
                   bucketToFileIDMap.put(bucketNumber, fileID);
                   // get bucket data in the latest partition and put it to the ExternalSpillableMap
-                  if (partition.equals(FlinkOptions.CHAIN_LATEST_PARTITION)
+                  if (partition.contains(FlinkOptions.CHAIN_LATEST_PARTITION)
                       || partition.equals("")) {
                     getRecordsInBucket(!partition.equals(""), fileSlice);
                   }

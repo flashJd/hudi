@@ -108,7 +108,7 @@ public class TestHoodieChainedTable {
 
         ColumnFamilyDescriptorBuilder.ModifyableColumnFamilyDescriptor ss =
             (ColumnFamilyDescriptorBuilder.ModifyableColumnFamilyDescriptor)
-                ColumnFamilyDescriptorBuilder.of("_ss");
+                ColumnFamilyDescriptorBuilder.of("ss");
         ss.setMaxVersions(HBASE_READ_VERSION);
         TableDescriptor tableDescriptor =
             TableDescriptorBuilder.newBuilder(TableName.valueOf("t1")).setColumnFamily(ss).build();
@@ -181,6 +181,7 @@ public class TestHoodieChainedTable {
             .option(FlinkOptions.PATH, tempFile.getAbsolutePath())
             .option("table.type", "MERGE_ON_READ")
             .option("index.type", "BUCKET")
+            // .option("hoodie.datasource.write.hive_style_partitioning", "true")
             .option("hoodie.bucket.index.num.buckets", "4")
             .option("hoodie.bucket.index.hash.field", "uuid")
             .option("hoodie.table.chain.enabled", "true")
