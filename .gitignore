@@ -1,9 +1,11 @@
 # Directories #
 /build/
 target/
+metastore_db/
 .mvn/
 hudi_table_test/
- 
+hudi_table_test/
+
 # OS Files #
 .DS_Store
  
