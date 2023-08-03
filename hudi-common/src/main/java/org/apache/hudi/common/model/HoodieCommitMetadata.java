@@ -117,7 +117,7 @@ public class HoodieCommitMetadata implements Serializable {
     return filePaths;
   }
 
-  public Map<HoodieFileGroupId, String> getFileGroupIdAndRelativePaths() {
+  public Map<HoodieFileGroupId, String> fetchFileGroupIdAndRelativePaths() {
     Map<HoodieFileGroupId, String> fileGroupIdToFullPaths = new HashMap<>();
     for (Map.Entry<String, List<HoodieWriteStat>> entry : getPartitionToWriteStats().entrySet()) {
       for (HoodieWriteStat stat : entry.getValue()) {

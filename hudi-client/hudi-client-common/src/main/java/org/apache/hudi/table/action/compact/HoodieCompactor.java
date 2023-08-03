@@ -192,7 +192,7 @@ public abstract class HoodieCompactor<T extends HoodieRecordPayload, I, K, O>
                         .get(),
                     HoodieCommitMetadata.class);
             commitMetadata
-                .getFileGroupIdAndRelativePaths()
+                .fetchFileGroupIdAndRelativePaths()
                 .forEach(
                     (k, v) -> {
                       HashSet<String> filePaths =
