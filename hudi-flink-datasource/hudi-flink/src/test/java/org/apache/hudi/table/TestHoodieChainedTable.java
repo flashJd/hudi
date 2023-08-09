@@ -28,6 +28,7 @@ import org.apache.hudi.util.AvroSchemaConverter;
 import org.apache.hudi.util.StreamerUtil;
 import org.apache.hudi.utils.TestConfigurations;
 
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.formats.common.TimestampFormat;
@@ -44,6 +45,7 @@ import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CollectionUtil;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.TableName;
@@ -82,18 +84,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /** Test cases for {@link TestHoodieChainedTable}. */
 public class TestHoodieChainedTable {
   private TableEnvironment streamTableEnv;
-  private boolean useHbase = false;
+  private boolean useHbase = true;
   private Connection connection;
 
   @TempDir File tempFile;
-
-  public static List<String> CHAIN_DATA_SET_INSERT =
-      Arrays.asList(
-          "{\"uuid\": \"id3\", \"name\": \"Danny\", \"age\": 23, \"ts\": \"2023-05-03T00:00:02\", \"start_date1\": \"2023-05-03\", \"end_date1\": \"2999-12-31\"}",
-          "{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 18, \"ts\": \"2023-05-03T00:00:02\", \"start_date1\": \"2023-05-03\", \"end_date1\": \"2999-12-31\"}",
-          "{\"uuid\": \"id3\", \"name\": \"Danny\", \"age\": 33, \"ts\": \"2023-05-04T00:00:02\", \"start_date1\": \"2023-05-04\", \"end_date1\": \"2999-12-31\"}",
-          "{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 19, \"ts\": \"2023-05-03T00:00:22\", \"start_date1\": \"2023-05-03\", \"end_date1\": \"2999-12-31\"}",
-          "{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 20, \"ts\": \"2023-05-05T00:00:55\", \"start_date1\": \"2023-05-05\", \"end_date1\": \"2999-12-31\"}");
 
   @BeforeEach
   void beforeEach() {
@@ -163,6 +157,51 @@ public class TestHoodieChainedTable {
     return Stream.of(data).map(Arguments::of);
   }
 
+  private void writeData(StreamExecutionEnvironment execEnv, Configuration conf, JsonRowDataDeserializationSchema deserializationSchema, List<String> data, int checkpoints) throws Exception {
+    DataStream<RowData> dataStream =
+        execEnv
+            // use continuous file source to trigger checkpoint
+            .addSource(new BoundedSourceFunction(data, checkpoints))
+            .name("continuous_file_source")
+            .setParallelism(1)
+            .map(record -> {
+              RowData rowData = deserializationSchema.deserialize(record.substring(2).getBytes(StandardCharsets.UTF_8));
+              if (record.startsWith("-D")) {
+                rowData.setRowKind(RowKind.DELETE);
+              }
+              return rowData;
+            });
+
+    DataStream<HoodieRecord> hoodieRecordDataStream =
+        Pipelines.bootstrap(conf, ROW_TYPE02, dataStream);
+    DataStream<Object> pipeline = Pipelines.hoodieStreamWrite(conf, hoodieRecordDataStream);
+    execEnv.addOperator(pipeline.getTransformation());
+    execEnv.execute();
+  }
+
+  private void verifyResult(boolean partitionTable, String expected) {
+    EnvironmentSettings settings = EnvironmentSettings.newInstance().build();
+    streamTableEnv = TableEnvironmentImpl.create(settings);
+    Configuration execConf = streamTableEnv.getConfig().getConfiguration();
+    execConf.setInteger(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 4);
+    execConf.setString("execution.checkpointing.interval", "2s");
+
+    // configure not to retry after failure
+    execConf.setString("restart-strategy", "fixed-delay");
+    execConf.setString("restart-strategy.fixed-delay.attempts", "0");
+    tableDDL(partitionTable, false);
+
+    List<Row> rows =
+        CollectionUtil.iterableToList(
+            () -> streamTableEnv.sqlQuery("select * from t1").execute().collect());
+    String rowsString =
+        rows.stream()
+            .sorted(Comparator.comparing(o -> o.getField(3).toString()))
+            .collect(Collectors.toList())
+            .toString();
+    assertEquals(expected, rowsString);
+  }
+
   static void execInsertSql(TableEnvironment tEnv, String insert) {
     TableResult tableResult = tEnv.executeSql(insert);
     // wait to finish
@@ -181,7 +220,7 @@ public class TestHoodieChainedTable {
             .option(FlinkOptions.PATH, tempFile.getAbsolutePath())
             .option("table.type", "MERGE_ON_READ")
             .option("index.type", "BUCKET")
-            // .option("hoodie.datasource.write.hive_style_partitioning", "true")
+            .option("hoodie.datasource.write.hive_style_partitioning", "true")
             .option("hoodie.bucket.index.num.buckets", "4")
             .option("hoodie.bucket.index.hash.field", "uuid")
             .option("hoodie.table.chain.enabled", "true")
@@ -356,7 +395,7 @@ public class TestHoodieChainedTable {
     EnvironmentSettings settings = EnvironmentSettings.newInstance().build();
     streamTableEnv = TableEnvironmentImpl.create(settings);
     Configuration execConf = streamTableEnv.getConfig().getConfiguration();
-    execConf.setInteger(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
+    execConf.setInteger(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 4);
     execConf.setString("execution.checkpointing.interval", "2s");
 
     // configure not to retry after failure
@@ -426,6 +465,7 @@ public class TestHoodieChainedTable {
     // set up checkpoint interval
     execEnv.enableCheckpointing(2000, CheckpointingMode.EXACTLY_ONCE);
     execEnv.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
+    execEnv.setRestartStrategy(RestartStrategies.noRestart());
 
     Map<String, String> options = tableDDL(partitionTable, false);
     Configuration conf = new Configuration();
@@ -447,47 +487,211 @@ public class TestHoodieChainedTable {
         new JsonRowDataDeserializationSchema(
             ROW_TYPE02, InternalTypeInfo.of(ROW_TYPE02), false, true, TimestampFormat.ISO_8601);
 
-    DataStream<RowData> dataStream =
-        execEnv
-            // use continuous file source to trigger checkpoint
-            .addSource(new BoundedSourceFunction(CHAIN_DATA_SET_INSERT, 2))
-            .name("continuous_file_source")
-            .setParallelism(1)
-            .map(
-                record ->
-                    deserializationSchema.deserialize(record.getBytes(StandardCharsets.UTF_8)));
+    List<String> dataInsertDelete =
+        Arrays.asList(
+            "+I{\"uuid\": \"id3\", \"name\": \"Danny\", \"age\": 23, \"ts\": \"2023-05-03T00:00:02\", \"start_date1\": \"2023-05-03\", \"end_date1\": \"2999-12-31\"}",
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 18, \"ts\": \"2023-05-03T00:00:02\", \"start_date1\": \"2023-05-03\", \"end_date1\": \"2999-12-31\"}",
+            "+I{\"uuid\": \"id3\", \"name\": \"Danny\", \"age\": 33, \"ts\": \"2023-05-04T00:00:02\", \"start_date1\": \"2023-05-04\", \"end_date1\": \"2999-12-31\"}",
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 19, \"ts\": \"2023-05-03T00:00:22\", \"start_date1\": \"2023-05-03\", \"end_date1\": \"2999-12-31\"}",
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 20, \"ts\": \"2023-05-05T00:00:55\", \"start_date1\": \"2023-05-05\", \"end_date1\": \"2999-12-31\"}",
+            "-D{\"uuid\": \"id3\", \"name\": \"Danny\", \"age\": 33, \"ts\": \"2023-05-06T00:00:26\", \"start_date1\": \"2023-05-06\", \"end_date1\": \"2999-12-31\"}");
 
-    DataStream<HoodieRecord> hoodieRecordDataStream =
-        Pipelines.bootstrap(conf, ROW_TYPE02, dataStream);
-    DataStream<Object> pipeline = Pipelines.hoodieStreamWrite(conf, hoodieRecordDataStream);
-    execEnv.addOperator(pipeline.getTransformation());
-    execEnv.execute();
+    writeData(execEnv, conf, deserializationSchema, dataInsertDelete, 2);
 
-    EnvironmentSettings settings = EnvironmentSettings.newInstance().build();
-    streamTableEnv = TableEnvironmentImpl.create(settings);
-    Configuration execConf = streamTableEnv.getConfig().getConfiguration();
-    execConf.setInteger(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 4);
-    execConf.setString("execution.checkpointing.interval", "2s");
-
-    // configure not to retry after failure
-    execConf.setString("restart-strategy", "fixed-delay");
-    execConf.setString("restart-strategy.fixed-delay.attempts", "0");
-    tableDDL(partitionTable, false);
-
-    List<Row> rows =
-        CollectionUtil.iterableToList(
-            () -> streamTableEnv.sqlQuery("select * from t1").execute().collect());
-    String rowsString =
-        rows.stream()
-            .sorted(Comparator.comparing(o -> o.getField(3).toString()))
-            .collect(Collectors.toList())
-            .toString();
     String expected =
         "[+I[id3, Danny, 23, 2023-05-03T00:00:02, 2023-05-03, 2023-05-04], "
             + "+I[id4, Lisa, 19, 2023-05-03T00:00:22, 2023-05-03, 2023-05-05], "
-            + "+I[id3, Danny, 33, 2023-05-04T00:00:02, 2023-05-04, 2999-12-31], "
+            + "+I[id3, Danny, 33, 2023-05-04T00:00:02, 2023-05-04, 2023-05-06], "
             + "+I[id4, Lisa, 20, 2023-05-05T00:00:55, 2023-05-05, 2999-12-31]]";
-    assertEquals(expected, rowsString);
+    verifyResult(partitionTable, expected);
+
+    // scenario that send a +I and -D of the same record(id4) in the same day, should remove the +I
+    List<String> dataInsertDelete1 =
+        Arrays.asList(
+            "+I{\"uuid\": \"id5\", \"name\": \"Lucy\", \"age\": 13, \"ts\": \"2023-05-05T00:01:13\", \"start_date1\": \"2023-05-05\", \"end_date1\": \"2999-12-31\"}",
+            "-D{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 20, \"ts\": \"2023-05-05T00:00:55\", \"start_date1\": \"2023-05-05\", \"end_date1\": \"2999-12-31\"}");
+
+    writeData(execEnv, conf, deserializationSchema, dataInsertDelete1, 1);
+
+    String expected1 =
+        "[+I[id3, Danny, 23, 2023-05-03T00:00:02, 2023-05-03, 2023-05-04], "
+            + "+I[id4, Lisa, 19, 2023-05-03T00:00:22, 2023-05-03, 2023-05-05], "
+            + "+I[id3, Danny, 33, 2023-05-04T00:00:02, 2023-05-04, 2023-05-06], "
+            + "+I[id5, Lucy, 13, 2023-05-05T00:01:13, 2023-05-05, 2999-12-31]]";
+    verifyResult(partitionTable, expected1);
+
+    // scenario that send a -D of a record after the record was chain closed, should ignore
+    List<String> dataInsertDelete2 =
+        Arrays.asList(
+            "-D{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 20, \"ts\": \"2023-05-04T00:00:55\", \"start_date1\": \"2023-05-04\", \"end_date1\": \"2999-12-31\"}",
+            "-D{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 20, \"ts\": \"2023-05-05T00:00:55\", \"start_date1\": \"2023-05-05\", \"end_date1\": \"2999-12-31\"}",
+            "-D{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 20, \"ts\": \"2023-05-06T00:00:55\", \"start_date1\": \"2023-05-06\", \"end_date1\": \"2999-12-31\"}"
+        );
+
+    writeData(execEnv, conf, deserializationSchema, dataInsertDelete2, 1);
+    verifyResult(partitionTable, expected1);
+
+    // scenario that send a +I of a record(not a late record) after the record was chain closed, should ignore
+    List<String> dataInsertDelete3 =
+        Arrays.asList(
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 20, \"ts\": \"2023-05-05T00:00:55\", \"start_date1\": \"2023-05-05\", \"end_date1\": \"2999-12-31\"}",
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 20, \"ts\": \"2023-05-06T00:00:55\", \"start_date1\": \"2023-05-06\", \"end_date1\": \"2999-12-31\"}"
+        );
+
+    writeData(execEnv, conf, deserializationSchema, dataInsertDelete3, 1);
+    verifyResult(partitionTable, expected1);
+
+    // scenario that send a +I of a late record after the record was chain closed, should process
+    List<String> dataInsertDelete4 =
+        Arrays.asList(
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 20, \"ts\": \"2023-05-04T00:00:55\", \"start_date1\": \"2023-05-04\", \"end_date1\": \"2999-12-31\"}"
+        );
+
+    writeData(execEnv, conf, deserializationSchema, dataInsertDelete4, 1);
+    String expected4 =
+        "[+I[id3, Danny, 23, 2023-05-03T00:00:02, 2023-05-03, 2023-05-04], "
+            + "+I[id4, Lisa, 19, 2023-05-03T00:00:22, 2023-05-03, 2023-05-04], "
+            + "+I[id3, Danny, 33, 2023-05-04T00:00:02, 2023-05-04, 2023-05-06], "
+            + "+I[id4, Lisa, 20, 2023-05-04T00:00:55, 2023-05-04, 2023-05-05], "
+            + "+I[id5, Lucy, 13, 2023-05-05T00:01:13, 2023-05-05, 2999-12-31]]";
+
+    verifyResult(partitionTable, expected4);
+
+    // scenario that send a +I of a late record after the record was chain closed, find the record to separate recursively
+    List<String> dataInsertDelete5 =
+        Arrays.asList(
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 15, \"ts\": \"2023-05-01T00:00:55\", \"start_date1\": \"2023-05-01\", \"end_date1\": \"2999-12-31\"}"
+        );
+
+    writeData(execEnv, conf, deserializationSchema, dataInsertDelete5, 1);
+    String expected5 =
+        "[+I[id4, Lisa, 15, 2023-05-01T00:00:55, 2023-05-01, 2023-05-03], "
+            + "+I[id3, Danny, 23, 2023-05-03T00:00:02, 2023-05-03, 2023-05-04], "
+            + "+I[id4, Lisa, 19, 2023-05-03T00:00:22, 2023-05-03, 2023-05-04], "
+            + "+I[id3, Danny, 33, 2023-05-04T00:00:02, 2023-05-04, 2023-05-06], "
+            + "+I[id4, Lisa, 20, 2023-05-04T00:00:55, 2023-05-04, 2023-05-05], "
+            + "+I[id5, Lucy, 13, 2023-05-05T00:01:13, 2023-05-05, 2999-12-31]]";
+    verifyResult(partitionTable, expected5);
+
+    // scenario that send a +I of a late record after the record was chain closed, find the record to separate recursively
+    List<String> dataInsertDelete6 =
+        Arrays.asList(
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 17, \"ts\": \"2023-05-03T00:00:11\", \"start_date1\": \"2023-05-03\", \"end_date1\": \"2999-12-31\"}",
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 18, \"ts\": \"2023-05-03T00:00:33\", \"start_date1\": \"2023-05-03\", \"end_date1\": \"2999-12-31\"}",
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 22, \"ts\": \"2023-05-03T00:00:55\", \"start_date1\": \"2023-05-03\", \"end_date1\": \"2999-12-31\"}"
+        );
+
+    writeData(execEnv, conf, deserializationSchema, dataInsertDelete6, 1);
+    String expected6 =
+        "[+I[id4, Lisa, 15, 2023-05-01T00:00:55, 2023-05-01, 2023-05-03], "
+            + "+I[id3, Danny, 23, 2023-05-03T00:00:02, 2023-05-03, 2023-05-04], "
+            + "+I[id4, Lisa, 22, 2023-05-03T00:00:55, 2023-05-03, 2023-05-04], "
+            + "+I[id3, Danny, 33, 2023-05-04T00:00:02, 2023-05-04, 2023-05-06], "
+            + "+I[id4, Lisa, 20, 2023-05-04T00:00:55, 2023-05-04, 2023-05-05], "
+            + "+I[id5, Lucy, 13, 2023-05-05T00:01:13, 2023-05-05, 2999-12-31]]";
+    verifyResult(partitionTable, expected6);
+  }
+
+  @ParameterizedTest
+  @MethodSource("configParamsV2")
+  void testChainedTableWithLateData(boolean partitionTable)
+      throws Exception {
+    StreamExecutionEnvironment execEnv = StreamExecutionEnvironment.getExecutionEnvironment();
+    execEnv.getConfig().disableObjectReuse();
+    execEnv.setParallelism(4);
+    // set up checkpoint interval
+    execEnv.enableCheckpointing(2000, CheckpointingMode.EXACTLY_ONCE);
+    execEnv.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
+
+    Map<String, String> options = tableDDL(partitionTable, false);
+    Configuration conf = new Configuration();
+    for (String key : options.keySet()) {
+      conf.setString(key, options.get(key));
+    }
+    String inferredSchema = AvroSchemaConverter.convertToSchema(ROW_TYPE02).toString();
+    conf.setString(FlinkOptions.SOURCE_AVRO_SCHEMA, inferredSchema);
+    conf.setInteger(FlinkOptions.WRITE_TASKS, 4);
+    conf.setString(FlinkOptions.TABLE_NAME, "t1");
+    conf.setString(FlinkOptions.RECORD_KEY_FIELD, "uuid,start_date1");
+    if (partitionTable) {
+      conf.setString(FlinkOptions.PARTITION_PATH_FIELD, "end_date1");
+    }
+    conf.setString(
+        FlinkOptions.KEYGEN_CLASS_NAME, "org.apache.hudi.keygen.ComplexAvroKeyGenerator");
+
+    JsonRowDataDeserializationSchema deserializationSchema =
+        new JsonRowDataDeserializationSchema(
+            ROW_TYPE02, InternalTypeInfo.of(ROW_TYPE02), false, true, TimestampFormat.ISO_8601);
+
+    List<String> dataInsertDelete =
+        Arrays.asList(
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 16, \"ts\": \"2023-05-03T00:00:22\", \"start_date1\": \"2023-05-03\", \"end_date1\": \"2999-12-31\"}",
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 19, \"ts\": \"2023-05-07T00:00:33\", \"start_date1\": \"2023-05-07\", \"end_date1\": \"2999-12-31\"}",
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 18, \"ts\": \"2023-05-06T00:00:44\", \"start_date1\": \"2023-05-06\", \"end_date1\": \"2999-12-31\"}"
+        );
+
+    writeData(execEnv, conf, deserializationSchema, dataInsertDelete, 1);
+
+    String expected =
+        "[+I[id4, Lisa, 16, 2023-05-03T00:00:22, 2023-05-03, 2023-05-06], "
+            + "+I[id4, Lisa, 18, 2023-05-06T00:00:44, 2023-05-06, 2023-05-07], "
+            + "+I[id4, Lisa, 19, 2023-05-07T00:00:33, 2023-05-07, 2999-12-31]]";
+    verifyResult(partitionTable, expected);
+  }
+
+  @ParameterizedTest
+  @MethodSource("configParamsV2")
+  void testChainedTableWithLateDataV2(boolean partitionTable)
+      throws Exception {
+    StreamExecutionEnvironment execEnv = StreamExecutionEnvironment.getExecutionEnvironment();
+    execEnv.getConfig().disableObjectReuse();
+    execEnv.setParallelism(4);
+    // set up checkpoint interval
+    execEnv.enableCheckpointing(2000, CheckpointingMode.EXACTLY_ONCE);
+    execEnv.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
+
+    Map<String, String> options = tableDDL(partitionTable, false);
+    Configuration conf = new Configuration();
+    for (String key : options.keySet()) {
+      conf.setString(key, options.get(key));
+    }
+    String inferredSchema = AvroSchemaConverter.convertToSchema(ROW_TYPE02).toString();
+    conf.setString(FlinkOptions.SOURCE_AVRO_SCHEMA, inferredSchema);
+    conf.setInteger(FlinkOptions.WRITE_TASKS, 4);
+    conf.setString(FlinkOptions.TABLE_NAME, "t1");
+    conf.setString(FlinkOptions.RECORD_KEY_FIELD, "uuid,start_date1");
+    if (partitionTable) {
+      conf.setString(FlinkOptions.PARTITION_PATH_FIELD, "end_date1");
+    }
+    conf.setString(
+        FlinkOptions.KEYGEN_CLASS_NAME, "org.apache.hudi.keygen.ComplexAvroKeyGenerator");
+
+    JsonRowDataDeserializationSchema deserializationSchema =
+        new JsonRowDataDeserializationSchema(
+            ROW_TYPE02, InternalTypeInfo.of(ROW_TYPE02), false, true, TimestampFormat.ISO_8601);
+
+    List<String> dataInsertDelete =
+        Arrays.asList(
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 16, \"ts\": \"2023-05-03T00:00:22\", \"start_date1\": \"2023-05-03\", \"end_date1\": \"2999-12-31\"}",
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 18, \"ts\": \"2023-05-05T00:00:55\", \"start_date1\": \"2023-05-05\", \"end_date1\": \"2999-12-31\"}"
+        );
+
+    writeData(execEnv, conf, deserializationSchema, dataInsertDelete, 1);
+
+    List<String> dataInsertDelete1 =
+        Arrays.asList(
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 19, \"ts\": \"2023-05-07T00:00:33\", \"start_date1\": \"2023-05-07\", \"end_date1\": \"2999-12-31\"}",
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 17, \"ts\": \"2023-05-04T00:00:44\", \"start_date1\": \"2023-05-04\", \"end_date1\": \"2999-12-31\"}"
+        );
+
+    writeData(execEnv, conf, deserializationSchema, dataInsertDelete1, 1);
+
+    String expected =
+        "[+I[id4, Lisa, 16, 2023-05-03T00:00:22, 2023-05-03, 2023-05-04], "
+            + "+I[id4, Lisa, 17, 2023-05-04T00:00:44, 2023-05-04, 2023-05-05], "
+            + "+I[id4, Lisa, 18, 2023-05-05T00:00:55, 2023-05-05, 2023-05-07], "
+            + "+I[id4, Lisa, 19, 2023-05-07T00:00:33, 2023-05-07, 2999-12-31]]";
+    verifyResult(partitionTable, expected);
   }
 
   @ParameterizedTest

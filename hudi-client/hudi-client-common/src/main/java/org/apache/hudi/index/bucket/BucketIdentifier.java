@@ -58,7 +58,7 @@ public class BucketIdentifier implements Serializable {
     return getHashKeys(hoodieKey.getRecordKey(), indexKeyFields);
   }
 
-  protected static List<String> getHashKeys(String recordKey, String indexKeyFields) {
+  public static List<String> getHashKeys(String recordKey, String indexKeyFields) {
     return !recordKey.contains(":") ? Collections.singletonList(recordKey) :
         getHashKeysUsingIndexFields(recordKey, Arrays.asList(indexKeyFields.split(",")));
   }
