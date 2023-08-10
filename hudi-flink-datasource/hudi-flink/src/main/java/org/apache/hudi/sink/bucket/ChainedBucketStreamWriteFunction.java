@@ -19,7 +19,10 @@
 package org.apache.hudi.sink.bucket;
 
 import org.apache.hudi.avro.HoodieAvroUtils;
+import org.apache.hudi.client.common.HoodieFlinkEngineContext;
+import org.apache.hudi.common.config.HoodieMetadataConfig;
 import org.apache.hudi.common.config.TypedProperties;
+import org.apache.hudi.common.fs.FSUtils;
 import org.apache.hudi.common.model.BaseAvroPayload;
 import org.apache.hudi.common.model.FileSlice;
 import org.apache.hudi.common.model.HoodieAvroRecord;
@@ -104,8 +107,10 @@ import static org.apache.hadoop.hbase.security.SecurityConstants.MASTER_KRB_PRIN
 import static org.apache.hadoop.hbase.security.SecurityConstants.REGIONSERVER_KRB_PRINCIPAL;
 import static org.apache.hadoop.hbase.security.User.HBASE_SECURITY_AUTHORIZATION_CONF_KEY;
 import static org.apache.hadoop.hbase.security.User.HBASE_SECURITY_CONF_KEY;
+import static org.apache.hudi.common.config.HoodieMetadataConfig.ENABLE_METADATA_INDEX_COLUMN_STATS;
 import static org.apache.hudi.configuration.FlinkOptions.CHAIN_SEARCH_MODE;
 import static org.apache.hudi.configuration.FlinkOptions.HIVE_STYLE_PARTITIONING;
+import static org.apache.hudi.configuration.FlinkOptions.METADATA_ENABLED;
 
 /**
  * A stream write function with bucket hash index with chain table enabled.
@@ -175,7 +180,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
     } else {
       // new record without old record
       bufferRecord(record);
-      updateChainIndex(originKey, record, null);
+      updateChainIndex(originKey, record, null, true);
     }
   }
 
@@ -345,14 +350,14 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
     }
   }
 
-  private void updateChainIndex(String originKey, HoodieRecord<?> record, String startDate) {
-    if (config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.SPILL_MAP.name())) {
+  private void updateChainIndex(String originKey, HoodieRecord<?> record, String startDate, boolean updateOpenChainRecords) {
+    if (startDate == null) {
+      startDate = BucketIdentifier.getHashKeys(record.getKey(), writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_START_DATE_COLUMN)).get(0);
+    }
+    unSentRecords.computeIfAbsent(originKey, k -> new TreeMap<>()).put(startDate, record);
+
+    if (config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.SPILL_MAP.name()) && updateOpenChainRecords) {
       openChainRecords.put(originKey, record);
-    } else {
-      if (startDate == null) {
-        startDate = BucketIdentifier.getHashKeys(record.getKey(), writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_START_DATE_COLUMN)).get(0);
-      }
-      unSentRecords.computeIfAbsent(originKey, k -> new TreeMap<>()).put(startDate, record);
     }
   }
 
@@ -571,7 +576,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
                 firstStartDate = endDate;
                 target = new ImmutablePair<>(new HoodieAvroRecord<>(hoodieRecord.getKey(), payloadCreation.createPayload(rewriteRecord)), firstStartDate);
               }
-              updateChainIndex(originKey, new HoodieAvroRecord<>(hoodieRecord.getKey(), payloadCreation.createPayload(rewriteRecord)), null);
+              updateChainIndex(originKey, new HoodieAvroRecord<>(hoodieRecord.getKey(), payloadCreation.createPayload(rewriteRecord)), null, false);
               continue;
             }
             baseFileReader.close();
@@ -591,7 +596,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
               firstStartDate = endDate;
               target = new ImmutablePair<>(new HoodieAvroRecord<>(hoodieKey, payloadCreation.createPayload(rewriteRecord)), firstStartDate);
             }
-            updateChainIndex(originKey, new HoodieAvroRecord<>(hoodieKey, payloadCreation.createPayload(rewriteRecord)), null);
+            updateChainIndex(originKey, new HoodieAvroRecord<>(hoodieKey, payloadCreation.createPayload(rewriteRecord)), null, false);
             continue;
           }
           baseFileReader.close();
@@ -636,7 +641,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
           firstStartDate = endDate;
           target = new ImmutablePair<>(new HoodieAvroRecord<>(hoodieRecord.getKey(), payloadCreation.createPayload(rewriteRecord)), firstStartDate);
         }
-        updateChainIndex(originKey, new HoodieAvroRecord<>(hoodieRecord.getKey(), payloadCreation.createPayload(rewriteRecord)), null);
+        updateChainIndex(originKey, new HoodieAvroRecord<>(hoodieRecord.getKey(), payloadCreation.createPayload(rewriteRecord)), null, false);
         continue;
       }
       scanner.close();
@@ -708,7 +713,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
         bufferRecord(deleteRecord);
       } else if (lateDate.compareTo(oldStartDate) < 0) {
         LOG.info(String.format("In partition: %s the original pk: %s startDate: %s is bigger than lateDate: %s", oldEndDate, originKey, oldStartDate, lateDate));
-        updateChainIndex(originKey, separatingRecord, null);
+        updateChainIndex(originKey, separatingRecord, null, false);
         processLateRecord(record, partition, bucketNum, originKey, lateDate, oldStartDate);
       } else {
         LOG.info(String.format("The proper separating record found: %s, late date: %s and the date is same", separatingRecord, lateDate));
@@ -749,7 +754,6 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
     Map<Integer, String> closeBucketToFileId;
     if (!partition.equals("")) {
       String closeChainPartiton = config.getBoolean(HIVE_STYLE_PARTITIONING) ? writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN) + "=" + date : date;
-      bootstrapIndexIfNeed(closeChainPartiton);
       closeBucketToFileId = bucketIndex.computeIfAbsent(closeChainPartiton, p -> new HashMap<>());
       closeBucketId = closeChainPartiton + bucketNum;
     } else {
@@ -795,7 +799,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
     List<String> originKeyList =
         BucketIdentifier.getHashKeys(closeChainRecord.getKey(), this.indexKeyFields);
     String originKey = String.join(",", originKeyList);
-    updateChainIndex(originKey, closeChainRecord, null);
+    updateChainIndex(originKey, closeChainRecord, null, false);
   }
 
   private void addMergedOpenChainRecord(HoodieRecord<?> record, HoodieRecord<?> oldHoodieRecord, String originKey) throws Exception {
@@ -812,7 +816,33 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
         new HoodieAvroRecord<>(
             record.getKey(), payloadCreation.createPayload(mergedIndexedRecord));
     bufferRecord(record);
-    updateChainIndex(originKey, mergedRecord, null);
+    updateChainIndex(originKey, mergedRecord, null, true);
+  }
+
+  private void updateOpenChainMap(String originKey, HoodieRecord<?> record, String endDate) throws Exception {
+    if (endDate.equals(FlinkOptions.CHAIN_LATEST_PARTITION)) {
+      openChainRecords.put(originKey, record);
+      return;
+    }
+    HoodieRecord<?> oldRecord = openChainRecords.get(originKey);
+    if (oldRecord == null) {
+      String recordKey = record.getRecordKey();
+      String newRecordKey = recordKey.substring(0, recordKey.lastIndexOf(writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_START_DATE_COLUMN)))
+          + writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_START_DATE_COLUMN) + ":" + endDate;
+      HoodieRecord<?> deleteRecord =
+          new HoodieAvroRecord<>(new HoodieKey(newRecordKey, record.getPartitionPath()), payloadCreation.createDeletePayload((BaseAvroPayload) record.getData()));
+      openChainRecords.put(originKey, deleteRecord);
+    } else {
+      String oldStartDate = BucketIdentifier.getHashKeys(oldRecord.getKey(), writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_START_DATE_COLUMN)).get(0);
+      if (endDate.compareTo(oldStartDate) > 0) {
+        String recordKey = record.getRecordKey();
+        String newRecordKey = recordKey.substring(0, recordKey.lastIndexOf(writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_START_DATE_COLUMN)))
+            + writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_START_DATE_COLUMN) + ":" + endDate;
+        HoodieRecord<?> deleteRecord =
+            new HoodieAvroRecord<>(new HoodieKey(newRecordKey, record.getPartitionPath()), payloadCreation.createDeletePayload((BaseAvroPayload) record.getData()));
+        openChainRecords.put(originKey, deleteRecord);
+      }
+    }
   }
 
   private void doChain(HoodieRecord<?> record, HoodieRecord<?> oldHoodieRecord, String partition, String oldStartDate)
@@ -838,7 +868,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
       if (newStartDate.compareTo(oldStartDate) < 0 && !operation.equals(HoodieOperation.DELETE)) {
         LOG.warn("The coming record is late, it's corresponding oldHoodieRecord is chain closed");
         // late logic
-        updateChainIndex(originKey, oldHoodieRecord, oldStartDate);
+        updateChainIndex(originKey, oldHoodieRecord, oldStartDate, false);
         processLateRecord(record, partition, bucketNum, originKey, newStartDate, oldStartDate);
       } else if (newStartDate.compareTo(oldStartDate) < 0 && operation.equals(HoodieOperation.DELETE)) {
         LOG.warn("The coming record is a late close chain record, it's corresponding oldHoodieRecord is chain closed");
@@ -862,7 +892,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
             new HoodieAvroRecord<>(
                 record.getKey(),
                 payloadCreation.createDeletePayload((BaseAvroPayload) record.getData()));
-        updateChainIndex(originKey, deleteRecord, null);
+        updateChainIndex(originKey, deleteRecord, null, true);
       } else {
         // delete oldStartDate record in 2999 partition if partitioned table
         deleteOldRecord(record, oldHoodieRecord, partition);
@@ -874,7 +904,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
             new HoodieAvroRecord<>(
                 record.getKey(),
                 payloadCreation.createDeletePayload((BaseAvroPayload) record.getData()));
-        updateChainIndex(originKey, deleteRecord, null);
+        updateChainIndex(originKey, deleteRecord, null, true);
       }
       return;
     }
@@ -885,7 +915,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
     } else if (newStartDate.compareTo(oldStartDate) > 0) {
       // add newStartDate record in 2999 partition
       bufferRecord(record);
-      updateChainIndex(originKey, record, null);
+      updateChainIndex(originKey, record, null, true);
       // delete oldStartDate record in 2999 partition if partitioned table
       deleteOldRecord(record, oldHoodieRecord, partition);
       // get close chain location
@@ -895,7 +925,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
     } else {
       // the coming record is late, process it
       LOG.warn(String.format("The coming record: %s is late", record));
-      updateChainIndex(originKey, oldHoodieRecord, null);
+      updateChainIndex(originKey, oldHoodieRecord, null, false);
       processLateRecord(record, partition, bucketNum, originKey, newStartDate, oldStartDate);
     }
   }
@@ -912,6 +942,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
               (BaseKeyGenerator)
                   HoodieAvroKeyGeneratorFactory.createKeyGenerator(
                       new TypedProperties(writeConfig.getProps())));
+      unSentRecords = new HashMap<>();
       if (config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.SPILL_MAP.name())) {
         this.openChainRecords =
             new ExternalSpillableMap<>(
@@ -923,7 +954,6 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
                 writeConfig.getCommonConfig().isBitCaskDiskMapCompressionEnabled());
       } else {
         unCheckedRecords = new ArrayList<>();
-        unSentRecords = new HashMap<>();
         synchronized (ChainedBucketStreamWriteFunction.class) {
           if (hbaseConnection == null || hbaseConnection.isClosed()) {
             hbaseConnection = getHBaseConnection();
@@ -953,6 +983,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
       processUnCheckedRecords();
     }
     super.snapshotState();
+    unSentRecords.clear();
   }
 
   @Override
@@ -1016,6 +1047,8 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
    */
   @Override
   public void bootstrapIndexIfNeed(String partition) {
+    // if partitioned table, should process all partitions as to bootstrap cancellation record
+    List<String> partitions = new ArrayList<>();
     if (bucketIndex.containsKey(partition)) {
       return;
     }
@@ -1026,7 +1059,6 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
             this.metaClient.getBasePathV2() + "/" + partition));
 
     // Load existing fileID belongs to this task
-    Map<Integer, String> bucketToFileIDMap = new HashMap<>();
     TableFileSystemView fsView = this.writeClient.getHoodieTable().getHoodieView();
     if (!fsView.getLastInstant().isPresent()) {
       LOG.info("No instant completed now, exit bootstrapIndexIfNeed.");
@@ -1037,47 +1069,62 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
       throw new RuntimeException(
           "fsView is not a instance of TableFileSystemView.SliceViewWithLatestSlice");
     }
-    ((TableFileSystemView.SliceViewWithLatestSlice) fsView)
-        .getLatestMergedFileSlicesBeforeOrOn(partition, latestCommit)
-        .forEach(
-            fileSlice -> {
-              String fileID = fileSlice.getFileId();
-              int bucketNumber = BucketIdentifier.bucketIdFromFileId(fileID);
-              // use LATEST_PARTITION in partitioned table as the same bucket in other partitions
-              // must be written in the same task
-              String keyByPartiton;
-              if (partition.equals("")) {
-                keyByPartiton = "";
-              } else {
-                keyByPartiton = config.getBoolean(HIVE_STYLE_PARTITIONING)
-                    ? writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN) + "=" + FlinkOptions.CHAIN_LATEST_PARTITION : FlinkOptions.CHAIN_LATEST_PARTITION;
-              }
-              if (isBucketToLoad(bucketNumber, keyByPartiton)) {
-                LOG.info(
-                    String.format(
-                        "Should load this partition bucket %s with fileID %s",
-                        bucketNumber, fileID));
-                if (bucketToFileIDMap.containsKey(bucketNumber)) {
-                  throw new RuntimeException(
-                      String.format(
-                          "Duplicate fileID %s from bucket %s of partition %s found "
-                              + "during the BucketStreamWriteFunction index bootstrap.",
-                          fileID, bucketNumber, partition));
+
+    if (partition.equals("")) {
+      partitions.add(partition);
+    } else {
+      // get all partitions in the table
+      HoodieMetadataConfig metadataConfig =
+          HoodieMetadataConfig.newBuilder()
+              .enable(config.getBoolean(METADATA_ENABLED))
+              .withMetadataIndexColumnStats(writeConfig.getBoolean(ENABLE_METADATA_INDEX_COLUMN_STATS))
+              .build();
+
+      List<String> allPartitions = FSUtils.getAllPartitionPaths(HoodieFlinkEngineContext.DEFAULT, metadataConfig, writeConfig.getBasePath());
+      partitions.addAll(allPartitions);
+    }
+
+    partitions.forEach(par -> {
+      Map<Integer, String> bucketToFileIDMap = new HashMap<>();
+      ((TableFileSystemView.SliceViewWithLatestSlice) fsView)
+          .getLatestMergedFileSlicesBeforeOrOn(par, latestCommit)
+          .forEach(
+              fileSlice -> {
+                String fileID = fileSlice.getFileId();
+                int bucketNumber = BucketIdentifier.bucketIdFromFileId(fileID);
+                // use LATEST_PARTITION in partitioned table as the same bucket in other partitions
+                // must be written in the same task
+                String keyByPartiton;
+                if (par.equals("")) {
+                  keyByPartiton = "";
                 } else {
+                  keyByPartiton = config.getBoolean(HIVE_STYLE_PARTITIONING)
+                      ? writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN) + "=" + FlinkOptions.CHAIN_LATEST_PARTITION : FlinkOptions.CHAIN_LATEST_PARTITION;
+                }
+                if (isBucketToLoad(bucketNumber, keyByPartiton)) {
                   LOG.info(
                       String.format(
-                          "Adding fileID %s to the bucket %s of partition %s.",
-                          fileID, bucketNumber, partition));
-                  bucketToFileIDMap.put(bucketNumber, fileID);
-                  // get bucket data in the latest partition and put it to the ExternalSpillableMap
-                  if (partition.contains(FlinkOptions.CHAIN_LATEST_PARTITION)
-                      || partition.equals("")) {
-                    getRecordsInBucket(!partition.equals(""), fileSlice);
+                          "Should load this partition bucket %s with fileID %s",
+                          bucketNumber, fileID));
+                  if (bucketToFileIDMap.containsKey(bucketNumber)) {
+                    throw new RuntimeException(
+                        String.format(
+                            "Duplicate fileID %s from bucket %s of partition %s found "
+                                + "during the BucketStreamWriteFunction index bootstrap.",
+                            fileID, bucketNumber, par));
+                  } else {
+                    LOG.info(
+                        String.format(
+                            "Adding fileID %s to the bucket %s of partition %s.",
+                            fileID, bucketNumber, par));
+                    bucketToFileIDMap.put(bucketNumber, fileID);
+                    // get bucket data in this fileSlice and put it to the ExternalSpillableMap
+                    getRecordsInBucket(fileSlice);
+                    }
                   }
-                }
-              }
-            });
-    bucketIndex.put(partition, bucketToFileIDMap);
+              });
+      bucketIndex.put(par, bucketToFileIDMap);
+    });
   }
 
   @Override
@@ -1099,7 +1146,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
     }
   }
 
-  private void getRecordsInBucket(boolean partitionTable, FileSlice latestFileSlice) {
+  private void getRecordsInBucket(FileSlice latestFileSlice) {
     if (!config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.SPILL_MAP.name()) || latestFileSlice == null) {
       return;
     }
@@ -1176,20 +1223,9 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
       while (baseReaderIterator.hasNext()) {
         GenericRecord baseRecord = baseReaderIterator.next();
         String key = KeyGenUtils.getRecordKeyFromGenericRecord(baseRecord, keyGeneratorOpt);
+        writtenRecordKeys.add(key);
         String partition =
             KeyGenUtils.getPartitionPathFromGenericRecord(baseRecord, keyGeneratorOpt);
-        if (!partitionTable) {
-          String nestedFieldVal =
-                  HoodieAvroUtils.getNestedFieldVal(
-                      baseRecord,
-                      writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN),
-                      false,
-                      false).toString();
-          if (!nestedFieldVal.equals(FlinkOptions.CHAIN_LATEST_PARTITION)) {
-            writtenRecordKeys.add(key);
-            continue;
-          }
-        }
         hoodieKey = new HoodieKey(key, partition);
         // get original pk
         List<String> originKeyList =
@@ -1208,24 +1244,15 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
                         StreamerUtil.getPayloadConfig(config).getProps());
             if (combinedAvroRecord.isPresent()) {
               GenericRecord record = (GenericRecord) combinedAvroRecord.get();
-              String nestedFieldVal =
-                  HoodieAvroUtils.getNestedFieldVal(
-                      record,
-                      writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN),
-                      false,
-                      false).toString();
-              if (!nestedFieldVal.equals(FlinkOptions.CHAIN_LATEST_PARTITION)) {
-                writtenRecordKeys.add(key);
-                continue;
-              }
               GenericRecord rewriteRecord =
                   HoodieAvroUtils.rewriteRecordWithNewSchema(
                       record, schema, Collections.emptyMap());
               HoodieRecord<?> combinedRecord =
                   new HoodieAvroRecord<>(hoodieKey, payloadCreation.createPayload(rewriteRecord));
-              openChainRecords.put(originKey, combinedRecord);
+              String endDate =
+                  HoodieAvroUtils.getNestedFieldVal(record, writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN), false, false).toString();
+              updateOpenChainMap(originKey, combinedRecord, endDate);
             }
-            writtenRecordKeys.add(key);
           } catch (Exception ex) {
             throw new HoodieException("Merge hoodie record error");
           }
@@ -1236,7 +1263,9 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
                     baseRecord, schema, Collections.emptyMap());
             HoodieRecord<?> rewriteBaseRecord =
                 new HoodieAvroRecord<>(hoodieKey, payloadCreation.createPayload(rewriteRecord));
-            openChainRecords.put(originKey, rewriteBaseRecord);
+            String endDate =
+                HoodieAvroUtils.getNestedFieldVal(rewriteRecord, writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN), false, false).toString();
+            updateOpenChainMap(originKey, rewriteBaseRecord, endDate);
           } catch (Exception ex) {
             throw new HoodieException("Rewrite BaseRecord error.");
           }
@@ -1263,18 +1292,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
         } catch (Exception ex) {
           throw new HoodieException("Record bytesToAvro error:", ex);
         }
-        if (!partitionTable) {
-          String nestedFieldVal =
-              HoodieAvroUtils.getNestedFieldVal(
-                      indexedRecord,
-                      writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN),
-                      false,
-                      false)
-                  .toString();
-          if (!nestedFieldVal.equals(FlinkOptions.CHAIN_LATEST_PARTITION)) {
-            continue;
-          }
-        }
+
         List<String> originKeyList =
             BucketIdentifier.getHashKeys(hoodieRecord.getKey(), this.indexKeyFields);
         String originKey = String.join(",", originKeyList);
@@ -1285,7 +1303,9 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
           HoodieRecord<?> rewriteHoodieRecord =
               new HoodieAvroRecord<>(
                   hoodieRecord.getKey(), payloadCreation.createPayload(rewriteRecord));
-          openChainRecords.put(originKey, rewriteHoodieRecord);
+          String endDate =
+              HoodieAvroUtils.getNestedFieldVal(rewriteRecord, writeConfig.getStringOrDefault(HoodieWriteConfig.TABLE_CHAIN_END_DATE_COLUMN), false, false).toString();
+          updateOpenChainMap(originKey, rewriteHoodieRecord, endDate);
         } catch (Exception ex) {
           throw new HoodieException("rewrite hoodie record error");
         }
