@@ -84,7 +84,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /** Test cases for {@link TestHoodieChainedTable}. */
 public class TestHoodieChainedTable {
   private TableEnvironment streamTableEnv;
-  private boolean useHbase = true;
+  private boolean useHbase = false;
   private Connection connection;
 
   @TempDir File tempFile;
@@ -688,6 +688,69 @@ public class TestHoodieChainedTable {
         );
 
     writeData(execEnv, conf, deserializationSchema, dataInsertDelete1, 1);
+
+    String expected =
+        "[+I[id4, Lisa, 16, 2023-05-03T00:00:22, 2023-05-03, 2023-05-04], "
+            + "+I[id4, Lisa, 17, 2023-05-04T00:00:44, 2023-05-04, 2023-05-05], "
+            + "+I[id4, Lisa, 18, 2023-05-05T00:00:55, 2023-05-05, 2023-05-07], "
+            + "+I[id4, Lisa, 19, 2023-05-07T00:00:33, 2023-05-07, 2999-12-31]]";
+    verifyResult(partitionTable, expected);
+  }
+
+  @ParameterizedTest
+  @MethodSource("configParamsV2")
+  void testChainedTableWithLateDataWithCompaction(boolean partitionTable)
+      throws Exception {
+    StreamExecutionEnvironment execEnv = StreamExecutionEnvironment.getExecutionEnvironment();
+    execEnv.getConfig().disableObjectReuse();
+    execEnv.setParallelism(4);
+    // set up checkpoint interval
+    execEnv.enableCheckpointing(2000, CheckpointingMode.EXACTLY_ONCE);
+    execEnv.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
+    execEnv.setRestartStrategy(RestartStrategies.noRestart());
+
+    Map<String, String> options = tableDDL(partitionTable, false);
+    Configuration conf = new Configuration();
+    for (String key : options.keySet()) {
+      conf.setString(key, options.get(key));
+    }
+    String inferredSchema = AvroSchemaConverter.convertToSchema(ROW_TYPE02).toString();
+    conf.setString(FlinkOptions.SOURCE_AVRO_SCHEMA, inferredSchema);
+    conf.setInteger(FlinkOptions.WRITE_TASKS, 4);
+    conf.setString(FlinkOptions.TABLE_NAME, "t1");
+    conf.setString(FlinkOptions.RECORD_KEY_FIELD, "uuid,start_date1");
+    if (partitionTable) {
+      conf.setString(FlinkOptions.PARTITION_PATH_FIELD, "end_date1");
+    }
+    conf.setString(
+        FlinkOptions.KEYGEN_CLASS_NAME, "org.apache.hudi.keygen.ComplexAvroKeyGenerator");
+
+    JsonRowDataDeserializationSchema deserializationSchema =
+        new JsonRowDataDeserializationSchema(
+            ROW_TYPE02, InternalTypeInfo.of(ROW_TYPE02), false, true, TimestampFormat.ISO_8601);
+
+    List<String> dataInsertDelete =
+        Arrays.asList(
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 16, \"ts\": \"2023-05-03T00:00:22\", \"start_date1\": \"2023-05-03\", \"end_date1\": \"2999-12-31\"}",
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 18, \"ts\": \"2023-05-05T00:00:55\", \"start_date1\": \"2023-05-05\", \"end_date1\": \"2999-12-31\"}"
+        );
+    conf.setBoolean(FlinkOptions.COMPACTION_ASYNC_ENABLED, false);
+    conf.setInteger(FlinkOptions.COMPACTION_DELTA_COMMITS, 1);
+    conf.setString("hoodie.compact.inline", "true");
+    writeData(execEnv, conf, deserializationSchema, dataInsertDelete, 1);
+
+    conf.setInteger(FlinkOptions.COMPACTION_DELTA_COMMITS, 10);
+    List<String> dataInsertDelete1 =
+        Arrays.asList(
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 19, \"ts\": \"2023-05-07T00:00:33\", \"start_date1\": \"2023-05-07\", \"end_date1\": \"2999-12-31\"}"
+        );
+    writeData(execEnv, conf, deserializationSchema, dataInsertDelete1, 1);
+
+    List<String> dataInsertDelete2 =
+        Arrays.asList(
+            "+I{\"uuid\": \"id4\", \"name\": \"Lisa\", \"age\": 17, \"ts\": \"2023-05-04T00:00:44\", \"start_date1\": \"2023-05-04\", \"end_date1\": \"2999-12-31\"}"
+        );
+    writeData(execEnv, conf, deserializationSchema, dataInsertDelete2, 1);
 
     String expected =
         "[+I[id4, Lisa, 16, 2023-05-03T00:00:22, 2023-05-03, 2023-05-04], "
