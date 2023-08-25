@@ -54,7 +54,7 @@ public class HoodieHBaseIndexConfig extends HoodieConfig {
 
   public static final ConfigProperty<Integer> GET_BATCH_SIZE = ConfigProperty
       .key("hoodie.index.hbase.get.batch.size")
-      .defaultValue(100)
+      .defaultValue(10000)
       .withDocumentation("Controls the batch size for performing gets against HBase. "
           + "Batching improves throughput, by saving round trips.");
 
@@ -66,7 +66,7 @@ public class HoodieHBaseIndexConfig extends HoodieConfig {
 
   public static final ConfigProperty<Integer> PUT_BATCH_SIZE = ConfigProperty
       .key("hoodie.index.hbase.put.batch.size")
-      .defaultValue(100)
+      .defaultValue(10000)
       .withDocumentation("Controls the batch size for performing puts against HBase. "
           + "Batching improves throughput, by saving round trips.");
 

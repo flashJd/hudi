@@ -97,6 +97,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.util.stream.Collectors.toList;
 import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.HADOOP_SECURITY_AUTHENTICATION;
@@ -146,6 +147,8 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
   private transient Map<String, TreeMap<String, HoodieRecord<?>>> unSentRecords;
 
   private static transient Connection hbaseConnection;
+
+  private static transient AtomicInteger taskNum;
 
   private transient HoodieWriteConfig writeConfig;
 
@@ -947,7 +950,7 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
         this.openChainRecords =
             new ExternalSpillableMap<>(
                 StreamerUtil.getMaxChainMemoryInBytes(config),
-                writeConfig.getSpillableMapBasePath(),
+                "/tmp/hudi/",
                 new DefaultSizeEstimator<>(),
                 new DefaultSizeEstimator<>(),
                 writeConfig.getCommonConfig().getSpillableDiskMapType(),
@@ -956,8 +959,11 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
         unCheckedRecords = new ArrayList<>();
         synchronized (ChainedBucketStreamWriteFunction.class) {
           if (hbaseConnection == null || hbaseConnection.isClosed()) {
+            taskNum = new AtomicInteger(0);
             hbaseConnection = getHBaseConnection();
+            LOG.info("hbaseConnection connected successfully");
           }
+          taskNum.incrementAndGet();
         }
       }
     } catch (Exception ex) {
@@ -1125,19 +1131,29 @@ public class ChainedBucketStreamWriteFunction<I> extends BucketStreamWriteFuncti
               });
       bucketIndex.put(par, bucketToFileIDMap);
     });
+    if (config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.SPILL_MAP.name())) {
+      LOG.info(String.format("SubTask: %d bootstrap successful, inMemory record: %d, inDisk record: %d",
+          taskID, openChainRecords.getInMemoryMapNumEntries(), openChainRecords.getDiskBasedMapNumEntries()));
+    }
   }
 
   @Override
   public void close() {
     super.close();
     if (config.getString(CHAIN_SEARCH_MODE).equals(ChainedTableSearchMode.SPILL_MAP.name())) {
+      LOG.info(String.format("SubTask: %d close successful, inMemory record: %d, inDisk record: %d",
+          taskID, openChainRecords.getInMemoryMapNumEntries(), openChainRecords.getDiskBasedMapNumEntries()));
       openChainRecords.close();
     } else {
       synchronized (ChainedBucketStreamWriteFunction.class) {
         if (hbaseConnection != null && !hbaseConnection.isClosed()) {
+          if (taskNum.decrementAndGet() != 0) {
+            return;
+          }
           try {
             hbaseConnection.close();
             hbaseConnection = null;
+            LOG.info("hbaseConnection closed successfully");
           } catch (Exception e) {
             LOG.error("Hbase connection close failed");
           }
