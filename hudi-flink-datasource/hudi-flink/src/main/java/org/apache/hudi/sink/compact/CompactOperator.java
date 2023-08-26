@@ -36,6 +36,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.streaming.api.graph.StreamConfig;
+import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -54,7 +55,7 @@ import java.util.List;
  * In order to execute scalable, the input should shuffle by the compact event {@link CompactionPlanEvent}.
  */
 public class CompactOperator extends TableStreamOperator<CompactionCommitEvent>
-    implements OneInputStreamOperator<CompactionPlanEvent, CompactionCommitEvent> {
+    implements OneInputStreamOperator<CompactionPlanEvent, CompactionCommitEvent>, BoundedOneInput {
   private static final Logger LOG = LoggerFactory.getLogger(CompactOperator.class);
 
   /**
@@ -179,5 +180,12 @@ public class CompactOperator extends TableStreamOperator<CompactionCommitEvent>
     MetricGroup metrics = getRuntimeContext().getMetricGroup();
     compactionMetrics = new FlinkCompactionMetrics(metrics);
     compactionMetrics.registerMetrics();
+  }
+
+  @Override
+  public void endInput() throws Exception {
+    if (null != this.executor) {
+      this.executor.close();
+    }
   }
 }

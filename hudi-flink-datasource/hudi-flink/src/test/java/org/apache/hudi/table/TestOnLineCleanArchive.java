@@ -69,8 +69,8 @@ import static org.apache.hudi.utils.TestConfigurations.sql;
 @Disabled("used for local test")
 public class TestOnLineCleanArchive {
   static TableEnvironment streamTableEnv;
-  static File tempFile = new File("../../hudi_table_test");
-  static boolean UsingHive = true;
+  static File tempFile = new File("./hudi_table_test");
+  static boolean UsingHive = false;
 
   static void execInsertSql(TableEnvironment tEnv, String insert) {
     TableResult tableResult = tEnv.executeSql(insert);
@@ -174,8 +174,8 @@ public class TestOnLineCleanArchive {
             .fields(FIELDS01)
             .option(FlinkOptions.PATH, "file://" + tempFile.getAbsolutePath())
             .option("table.type", "MERGE_ON_READ")
+            .option("index.type", "BUCKET")
             .option("index.bootstrap.enabled", "true")
-            // .option("index.type", "BUCKET")
             .option("index.global.enabled", "true")
             .option("write.bucket_assign.tasks", "2")
             .option("hoodie.clean.automatic", "true")
@@ -202,7 +202,7 @@ public class TestOnLineCleanArchive {
             .option("hoodie.metadata.index.async", "false")
             .option("hoodie.metadata.index.column.stats.enable", "true")
             .option("hoodie.metadata.index.bloom.filter.enable", "false")
-            .option("hoodie.datasource.query.type", "read_optimized")
+            // .option("hoodie.datasource.query.type", "read_optimized")
             .end();
     streamTableEnv.executeSql(hoodieTableDDL);
   }
@@ -239,7 +239,7 @@ public class TestOnLineCleanArchive {
       HoodieTableMetadata metadataTable = HoodieTableMetadata.create(
           HoodieFlinkEngineContext.DEFAULT,
           metadataConfig, basePathStr,
-          FileSystemViewStorageConfig.SPILLABLE_DIR.defaultValue());
+          false);
 
       List<String> encodedTargetColumnNames = Arrays.stream(new String[] {column})
           .map(colName -> new ColumnIndexID(colName).asBase64EncodedString()).collect(Collectors.toList());
